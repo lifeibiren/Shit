@@ -1,7 +1,6 @@
 import Data.Bits
 import Network.Socket
 import Network.BSD
---import Data.List
 import Data.Map.Strict
 import Data.Time.Clock
 
@@ -9,22 +8,18 @@ type HandlerFunc = Socket -> SockAddr -> String -> UserMap -> IO ()
 type User = SockAddr
 type UserMap = Map User UTCTime
 
-server :: String              -- ^ Port number or name; 514 is default
+server :: PortNumber          -- ^ Port number or name; 514 is default
        -> HandlerFunc         -- ^ Function to handle incoming messages
        -> IO ()
 server port handlerfunc = withSocketsDo $
     do -- Look up the port.  Either raises an exception or returns
        -- a nonempty list.  
-       addrinfos <- getAddrInfo 
-                    (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
-                    Nothing (Just port)
-       let serveraddr = head addrinfos
 
        -- Create a socket
-       sock <- socket (addrFamily serveraddr) Datagram defaultProtocol
+       sock <- socket AF_INET Datagram defaultProtocol
 
        -- Bind it to the address we're listening to
-       bind sock (addrAddress serveraddr)
+       bind sock $ SockAddrInet port iNADDR_ANY
 
        -- Loop forever processing incoming data.  Ctrl-C to abort.
        procMessages sock empty
@@ -62,4 +57,4 @@ plainHandler sock addr msg userMap = do
     where concatMsg key _ result = show key ++ "\n" ++ result
 
 main :: IO ()
-main = server "6666" plainHandler
+main = server 6666 plainHandler

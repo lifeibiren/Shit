@@ -12,7 +12,7 @@ main = do
     result <- execStateT (process count) (("Nobody", -1), ("Nobody", 20000001), 0)
     let ((youngest, _), (oldest, _), num) = result
     printf "%d %s %s" num oldest youngest
-
+    
 process ::  Int -> StateT RecordState IO ()
 process 0     = do
     return ()
