@@ -33,32 +33,32 @@ server port handlerfunc = withSocketsDo $
                  -- and save its content into msg and its source
                  -- IP and port into addr
                  (msg, _, addr) <- recvFrom sock 1024
-                 time <- getCurrentTime
-                 newUserMap <- foldrWithKey removeDead (return empty) $ insert addr time userMap
+                 now <- getCurrentTime
+                 let filterFunc  = removeDead now 60 -- 60s time out
+                     newUserMap  = insert addr now userMap
+                     filteredMap = foldrWithKey filterFunc empty newUserMap
                  -- Handle it
-                 handlerfunc sock addr msg newUserMap
+                 handlerfunc sock addr msg filteredMap
                  -- And process more messages
-                 procMessages sock newUserMap
-              
-removeDead :: SockAddr -> UTCTime -> IO UserMap -> IO UserMap
-removeDead key val resultIO = do
-    now <- getCurrentTime
-    result <- resultIO
-    let past = diffUTCTime now val
-    if past > 60 -- 60 seconds timeout
-        then return result
-        else return $ insert key val result
+                 procMessages sock filteredMap
 
+-- Strip timed out clients
+removeDead :: UTCTime -> NominalDiffTime -> SockAddr -> UTCTime -> UserMap -> UserMap
+removeDead now timeout key val result
+    | past > timeout = result 
+    | otherwise      = insert key val result 
+    where past = diffUTCTime now val
 
 -- A simple handler that prints incoming packets
 plainHandler :: HandlerFunc
 plainHandler sock addr msg userMap = do
     let output = "From " ++ show addr ++ ": " ++ msg
-    let ret = foldrWithKey concatMsg "" userMap 
     putStrLn output
+    
+    let ret = foldrWithKey concatMsg "" userMap 
+    sent <- sendTo sock ret addr
     putStrLn ret
-    sendTo sock ret addr
-    return ()
+
     where concatMsg key _ result = show key ++ "\n" ++ result
 
 main :: IO ()
