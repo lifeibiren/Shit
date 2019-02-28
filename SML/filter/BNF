@@ -1,0 +1,9 @@
+filter -> expr | "(" expr ")"
+expr -> expr relop expr | NOT expr | "(" expr ")" | assert
+assert -> dir proto type
+type -> host | net | port | addr
+dir -> "src" | "dst" | "src or dst" | "src and dst"
+proto -> "ether"| "ip" | "ip6" | "arp" | "tcp" | "udp"
+relop -> AND | OR
+AND -> "and" | "&&"
+OR ->   "or" | "||"
