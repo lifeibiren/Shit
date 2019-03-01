@@ -1,9 +1,24 @@
 
-datatype lexresult = BRACKET | TYPE | DIR | PROTO | AND | OR | NOT | OTHER_KEY | ETHERNET | IPV4 | IPV6 | EOF | INTEGER of int
+datatype dirType   = SRC | DST | ANY | UNI
+datatype lexresult = EOF | TYPE of string | DIR of dirType | PROTO of string | OTHER_KEY of string |
+                     ETHERNET of string | IPV4 of string | IPV6 of string | 
+                     AND | OR | NOT | BIT_AND | BIT_OR | BIT_NOT |
+                     ABOVE | LESS | EQUAL | ABOVE_OR_EQUAL | LESS_OR_EQUAL | NOT_EQUAL | 
+                     SLASH | ADD | SUB | MUL | MOD | XOR | SHL | SHR |
+                     LBRACKET | RBRACKET | INTEGER of int
 
 val linenum = ref 1
 val error = fn x => TextIO.output(TextIO.stdOut, x ^ "\n")
 val eof = fn () => EOF
+
+fun printYytext text = print (text ^ "\n")
+
+fun strToDirType str = case str of 
+                          "dst" => DST
+                        | "src" => SRC 
+                        | "dst and src" => ANY
+                        | "dst or src" => UNI
+                        | _  => ANY
 
 %%
 %structure FilterLex
@@ -62,20 +77,20 @@ integer        = {nzdig}{dig}*;
 %%
 \n => (!linenum = !linenum + 1; lex());
 {ws} => (lex());
-{integer}  => (print ("integer " ^ yytext ^ "\n");
+{integer}  => ((printYytext yytext);
                 INTEGER (case (Int.fromString yytext) of
                     SOME i => i
                  |  NONE   => 0));
-{l_bracket} => (print ("l_bracket " ^ yytext ^ "\n"); BRACKET);
-{r_bracket}  => (print ("r_bracket " ^ yytext ^ "\n"); BRACKET);
-{and}  =>   (print ("and " ^ yytext ^ "\n"); AND);
-{or}   => (print ("or " ^ yytext ^ "\n"); OR);
-{not}  => (print ("not " ^ yytext ^ "\n"); NOT);
-{dir}   =>  (print ("dir " ^ yytext ^ "\n"); DIR);
-{type}  => (print ("type " ^ yytext ^ "\n"); TYPE);
-{proto} =>  (print ("proto " ^ yytext ^ "\n"); PROTO);
-{other_kwd} =>  (print ("other_kwd " ^ yytext ^ "\n"); OTHER_KEY);
-{ether_addr} =>  (print ("ether_addr " ^ yytext ^ "\n"); ETHERNET);
-{ipv4_addr}  => (print ("ipv4_addr " ^ yytext ^ "\n"); IPV4);
-{ipv6_addr}  => (print ("ipv6_addr " ^ yytext ^ "\n"); IPV6);
+{l_bracket} => (printYytext yytext; LBRACKET);
+{r_bracket}  => (printYytext yytext; RBRACKET);
+{and}  =>   (printYytext yytext; AND);
+{or}   => (printYytext yytext; OR);
+{not}  => (printYytext yytext; NOT);
+{dir}   =>  (printYytext yytext; DIR (strToDirType yytext));
+{type}  => (printYytext yytext; TYPE yytext);
+{proto} =>  (printYytext yytext; PROTO yytext);
+{other_kwd} =>  (printYytext yytext; OTHER_KEY yytext);
+{ether_addr} =>  (printYytext yytext; ETHERNET yytext);
+{ipv4_addr}  => (printYytext yytext; IPV4 yytext);
+{ipv6_addr}  => (printYytext yytext; IPV6 yytext);
 .     => (error ("ignoring bad character " ^ yytext); lex());

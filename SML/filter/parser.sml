@@ -9,9 +9,9 @@ let
     fun extract () = let
                          val token = lexer()
                          val _ = case token of
-                                   TYPE => print ("TYPE " (*^ lexer.yytext*) ^ "\n")
-                                 | Dec.DIR  => print ("DIR " (*^ lexer.yytext*) ^ "\n")
-                                 | Dec.PROTO => print ("PROTO " (*^ lexer.yytext*) ^ "\n")
+                                   TYPE str => print ("TYPE " (*^ lexer.yytext*) ^ "\n")
+                                 | DIR str => print ("DIR " ^ str ^ "\n")
+                                 | PROTO str => print ("PROTO " (*^ lexer.yytext*) ^ "\n")
                                  | INTEGER i => print (Int.toString i)
                                  | _ => ()
                      in
