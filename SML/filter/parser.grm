@@ -1,0 +1,139 @@
+(* User declarations *)
+
+
+%%
+
+%name Filter
+
+%eop EOF
+
+%pos int
+
+%term  EOF
+     | LBRACKET
+     | RBRACKET
+     | LS_BRACKET
+     | RS_BRACKET
+     | COLON
+     | AND
+     | OR
+     | NOT
+     | BIT_AND
+     | BIT_OR
+     | BIT_NOT
+     | ABOVE
+     | BELOW
+     | EQ
+     | ABOVE_OR_EQUAL
+     | BELOW_OR_EQUAL
+     | NOT_EQUAL
+     | SLASH
+     | ADD
+     | SUB
+     | MUL
+     | MOD
+     | XOR
+     | SHL
+     | SHR
+     | SRC
+     | DST
+     | ANY
+     | UNI
+     | HOST
+     | NET
+     | PORT
+     | PORTRANGE
+     | ETHER
+     | WLAN
+     | VLAN
+     | IP
+     | IP6
+     | TCP
+     | UDP
+     | ICMP
+     | ICMP6
+     | ARP
+     | PROTO
+     | ETHERNET of string
+     | IPV4 of string
+     | IPV6 of string
+     | OTHER_KEY of string
+     | INTEGER of int
+
+%nonterm expr
+       | subexpr
+       | filter
+       | algop
+       | direc
+       | proto
+       | protoexpr
+       | arith_expr
+       | proto_expr
+       
+   
+%start filter
+
+%noshift EOF
+%nodefault
+%verbose 
+%left AND OR
+%right NOT
+
+%%
+
+filter : expr ()
+
+expr : LBRACKET expr RBRACKET ()
+     | expr AND expr ()
+     | expr OR expr ()
+     | NOT expr()
+     | subexpr ()
+
+
+subexpr : direc HOST IPV4 ()
+     | direc HOST IPV6 ()
+     | ETHER PROTO TCP  ()
+     | direc PORT INTEGER ()
+     | TCP ()
+     | VLAN INTEGER ()
+     | arith_expr ()
+
+arith_expr : protoexpr algop arith_expr ()
+           | protoexpr ()
+           | INTEGER ()
+
+
+proto_expr : proto LS_BRACKET INTEGER RS_BRACKET ()
+           | proto LS_BRACKET INTEGER COLON INTEGER RS_BRACKET ()
+     
+
+algop :  BIT_OR ()
+       | BIT_NOT ()
+       | ABOVE ()
+       | BELOW ()
+       | EQ ()
+       | ABOVE_OR_EQUAL ()
+       | BELOW_OR_EQUAL ()
+       | NOT_EQUAL ()
+       | ADD ()
+       | SUB ()
+       | MUL ()
+       | MOD ()
+       | XOR ()
+       | SHL ()
+       | SHR ()
+      
+direc : ANY ()
+      | UNI ()
+      | SRC ()
+      | DST ()
+      | ()
+
+proto: ETHER ()
+    | IP ()
+    | ARP ()
+    | TCP ()
+    | UDP ()
+    | ICMP ()
+    | IP6 ()
+    | ICMP6 ()

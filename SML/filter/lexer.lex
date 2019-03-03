@@ -1,27 +1,21 @@
 
-datatype dirType   = SRC | DST | ANY | UNI
-datatype lexresult = EOF | TYPE of string | DIR of dirType | PROTO of string | OTHER_KEY of string |
-                     ETHERNET of string | IPV4 of string | IPV6 of string | 
-                     AND | OR | NOT | BIT_AND | BIT_OR | BIT_NOT |
-                     ABOVE | LESS | EQUAL | ABOVE_OR_EQUAL | LESS_OR_EQUAL | NOT_EQUAL | 
-                     SLASH | ADD | SUB | MUL | MOD | XOR | SHL | SHR |
-                     LBRACKET | RBRACKET | INTEGER of int
+structure Tokens = Tokens
 
+type pos = int
+type svalue = Tokens.svalue
+type ('a,'b) token = ('a,'b) Tokens.token
+type lexresult = (svalue,pos) token
+
+val pos = ref 0
 val linenum = ref 1
 val error = fn x => TextIO.output(TextIO.stdOut, x ^ "\n")
-val eof = fn () => EOF
+val eof = fn () => Tokens.EOF (!linenum, !pos)
 
 fun printYytext text = print (text ^ "\n")
 
-fun strToDirType str = case str of 
-                          "dst" => DST
-                        | "src" => SRC 
-                        | "dst and src" => ANY
-                        | "dst or src" => UNI
-                        | _  => ANY
-
+open Tokens
 %%
-%structure FilterLex
+%header (functor FilterLexFun(structure Tokens: Filter_TOKENS));
 ws            = [\ \t]+;
 l_bracket     = "(";
 r_bracket     = ")";
@@ -77,20 +71,17 @@ integer        = {nzdig}{dig}*;
 %%
 \n => (!linenum = !linenum + 1; lex());
 {ws} => (lex());
-{integer}  => ((printYytext yytext);
-                INTEGER (case (Int.fromString yytext) of
-                    SOME i => i
-                 |  NONE   => 0));
-{l_bracket} => (printYytext yytext; LBRACKET);
-{r_bracket}  => (printYytext yytext; RBRACKET);
-{and}  =>   (printYytext yytext; AND);
-{or}   => (printYytext yytext; OR);
-{not}  => (printYytext yytext; NOT);
-{dir}   =>  (printYytext yytext; DIR (strToDirType yytext));
-{type}  => (printYytext yytext; TYPE yytext);
-{proto} =>  (printYytext yytext; PROTO yytext);
-{other_kwd} =>  (printYytext yytext; OTHER_KEY yytext);
-{ether_addr} =>  (printYytext yytext; ETHERNET yytext);
-{ipv4_addr}  => (printYytext yytext; IPV4 yytext);
-{ipv6_addr}  => (printYytext yytext; IPV6 yytext);
+{and}  =>   (printYytext yytext; AND(!linenum, yypos));
+{or} => (printYytext yytext; OR(!linenum, yypos));
+"(" => (printYytext yytext; LBRACKET(!linenum, yypos));
+")" => (printYytext yytext; RBRACKET(!linenum, yypos));
+"src" => (printYytext yytext; SRC(!linenum, yypos));
+"dst" => (printYytext yytext; DST(!linenum, yypos));
+"host" => (printYytext yytext; HOST(!linenum, yypos));
+"ip" => (printYytext yytext; IP(!linenum, yypos));
+"port" => (printYytext yytext; PORT(!linenum, yypos));
+"tcp" => (printYytext yytext; TCP(!linenum, yypos));
+"vlan" => (printYytext yytext; VLAN(!linenum, yypos));
+{integer} => (printYytext yytext; INTEGER((fn SOME i => i | NONE => 0) (Int.fromString yytext), !linenum, yypos));
+{ipv4_addr} => (printYytext yytext; IPV4 (yytext, !linenum, yypos));
 .     => (error ("ignoring bad character " ^ yytext); lex());
