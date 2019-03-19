@@ -1,32 +1,3 @@
-(*val _ =
-   case Posix.Process.fork () of
-      NONE =>
-         let
-            val _ = Posix.Process.sleep (Time.fromSeconds 1)
-            val (socket, _) = Socket.accept socket
-            val _ = print (read socket)
-            val _ = print (case readNB socket of
-                              NONE => "NONE\n"
-                            | SOME s => s)
-            val _ = write (socket, "goodbye, world\n");
-            val _ = Socket.close socket
-         in
-            ()
-         end
-    | SOME pid =>
-         let
-            val socket' = INetSock.TCP.socket ()
-            val _ = Socket.connect (socket', addr)
-            val _ = write (socket', "hello, world\n")
-            val _ = print (read socket')
-            val _ = Socket.close socket'
-            val (pid', status)  = Posix.Process.wait ()
-         in
-            if pid = pid' andalso status = Posix.Process.W_EXITED
-               then ()
-            else print "child failed\n"
-         end *)
-
 datatype ('af,'sock_type) session = Session of {
     socket: ('af, 'sock_type) Socket.sock,
     addr: string,
@@ -72,7 +43,7 @@ fun readNB socket : string * bool =
                                             in
                                                 (str ^ left, error)
                                             end
-                                        else ("", true)
+                                        else ("", false) (* EOF *)
                           | NONE => ("", true)
     in
         loop socket
@@ -86,6 +57,17 @@ fun write (socket, s: string): unit =
 fun handleClient sock addr =
     let
         val (inAddr, port) = INetSock.fromAddr addr
+        fun makeFD sock (r,w,p) =
+            let
+                fun makeIn x = if r then OS.IO.pollIn x else x
+                fun makeOut x = if w then OS.IO.pollOut x else x
+                fun makePri x = if p then OS.IO.pollPri x else x
+                fun ioDesc sock = case OS.IO.pollDesc (Socket.ioDesc sock) of
+                                 SOME fd => fd
+                               | NONE => raise Failure
+            in
+                (makeIn o makeOut o makePri o ioDesc) sock
+            end
         fun rhandle (Session ss) =
             let
                 val _ = print ("read handler\n")
@@ -96,28 +78,26 @@ fun handleClient sock addr =
                 val count = ref (#count ss)
                 val _ = !count := !(!count) + (String.size str)
                 val _ = print ("received " ^ (Int.toString (!(!count))) ^ "\n")
+                val _ = (#pollFd ss) := makeFD (#socket ss) (true, true, false)
             in
-                not error
+                true
             end
         fun whandle (Session ss) =
             let
                 val _ = print ("write handler\n")
                 val sock = #socket ss
                 val _ = write (sock, "Hello World\n")
+                val _ = (#pollFd ss) := makeFD (#socket ss) (true, false, false)
             in
                 true
             end
-        fun makeFD sock = (OS.IO.pollIn o OS.IO.pollPri o
-            (fn ioDesc => case OS.IO.pollDesc ioDesc of
-                            SOME fd => fd
-                          | NONE => raise Failure) o Socket.ioDesc) sock
     in
         {
             socket = sock,
             addr = NetHostDB.toString inAddr,
             port = port,
             count = ref 0,
-            pollFd = ref (makeFD sock),
+            pollFd = ref (makeFD sock (true, false, false)),
             readHandler = rhandle,
             writeHandler = whandle,
             exceptHandler = fn _ => false
@@ -192,50 +172,55 @@ fun main () : unit =
                 val pollInfoList = OS.IO.poll (pollDescList, NONE)
                 val _ = print ("Poll info " ^ Int.toString (length pollInfoList) ^ "\n")
 
-                fun handler poll_info =
+                fun handler pollInfo =
                     let
-                        val ioDesc = (OS.IO.pollToIODesc o OS.IO.infoToPollDesc) poll_info
-                        val isIn = OS.IO.isIn poll_info
-                        val isOut = OS.IO.isOut poll_info
-                        val isPri = OS.IO.isPri poll_info
+                        val ioDesc = (OS.IO.pollToIODesc o OS.IO.infoToPollDesc) pollInfo
+                        val isIn = OS.IO.isIn pollInfo
+                        val isOut = OS.IO.isOut pollInfo
+                        val isPri = OS.IO.isPri pollInfo
                         val anyEvents = isIn orelse isOut orelse isPri
                         fun pollInfoToIODesc info = OS.IO.pollToIODesc (OS.IO.infoToPollDesc info)
+
+                        fun callHandler pollInfo ss =
+                            let
+                                val poll_desc = OS.IO.infoToPollDesc pollInfo
+                                val e1 = if isIn
+                                         then (#readHandler ss) (Session ss)
+                                         else true
+                                val e2 = if isOut
+                                         then (#writeHandler ss) (Session ss)
+                                         else true
+                                val e3 = if isPri
+                                         then (#exceptHandler ss) (Session ss)
+                                         else true
+                                in (SOME (Session ss),
+                                    e1 andalso e2 andalso e3)
+                            end
                     in
                         if not anyEvents then (NONE, true)
                         else case SessionTable.peek (table, ioDesc) of
                                NONE => if OS.IO.compare (OS.IO.pollToIODesc pollFd,
-                                                         pollInfoToIODesc poll_info) = EQUAL
+                                                         pollInfoToIODesc pollInfo) = EQUAL
                                        then (doAccept table; (NONE, true))
                                        else (NONE, true)
                              | SOME (Session ss) =>
                                 case Socket.Ctl.getERROR (#socket ss) of
                                   true => (SOME (Session ss), false)
-                                | false => let  val poll_desc = OS.IO.infoToPollDesc poll_info
-                                                val e1 = if isIn
-                                                         then (#readHandler ss) (Session ss)
-                                                         else true
-                                                val e2 = if isOut
-                                                         then (#writeHandler ss) (Session ss)
-                                                         else true
-                                                val e3 = if isPri
-                                                         then (#exceptHandler ss) (Session ss)
-                                                         else true
-                                                in (SOME (Session ss),
-                                                    e1 andalso e2 andalso e3)
-                                            end
+                                | false => callHandler pollInfo ss
                     end
 
-
-                val _ = map (fn info => let
-                                            val (session, success) = handler info
-                                        in
-                                            case success of
-                                              true  => ()
-                                            | false => (case session of
-                                                         SOME (Session ss) =>
-                                                         (SessionTable.remove (table, getSessionKey (Session ss)); ())
-                                                       | NONE => ())
-                                        end) pollInfoList
+                val _ = map (fn info =>
+                    let
+                        val (session, success) = handler info
+                    in
+                        case success of
+                          true  => ()
+                        | false => (case session of
+                                     SOME (Session ss) =>
+                                     (SessionTable.remove (table,
+                                         getSessionKey (Session ss)); ())
+                                   | NONE => ())
+                    end) pollInfoList
                 val _ = print ("one round\n")
             in
                 acceptForever table
