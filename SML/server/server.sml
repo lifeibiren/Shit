@@ -43,16 +43,32 @@ fun readNB socket : string * bool =
                                             in
                                                 (str ^ left, error)
                                             end
-                                        else ("", false) (* EOF *)
-                          | NONE => ("", true)
+                                        else ("", true) (* EOF *)
+                          | NONE => ("", false)
+    in
+        loop socket
+    end
+
+fun readNB_ socket : string * bool =
+    let
+        fun loop socket =
+            case Socket.recvVecNB (socket, 1) of
+              SOME vec => if Word8Vector.length vec > 0 then
+                            let val str = Byte.unpackStringVec
+                                            (Word8VectorSlice.full (vec))
+                                val (left, error) = loop socket
+                            in
+                                (str ^ left, error)
+                            end
+                          else ("", true) (* EOF *)
+            | NONE => ("", false)
     in
         loop socket
     end
 
 
-fun write (socket, s: string): unit =
-   (Socket.sendVec (socket, Word8VectorSlice.full (Byte.stringToBytes s))
-    ; ())
+fun write (socket, s: string): int =
+   Socket.sendVec (socket, Word8VectorSlice.full (Byte.stringToBytes s))
 
 fun handleClient sock addr =
     let
@@ -73,23 +89,24 @@ fun handleClient sock addr =
                 val _ = print ("read handler\n")
                 val _ = print ("port " ^ (Int.toString (#port ss)) ^ "\n")
                 val sock = #socket ss
-                val (str, error) = readNB sock
+                val (str, error) = readNB_ sock
                 val _ = print str
                 val count = ref (#count ss)
                 val _ = !count := !(!count) + (String.size str)
                 val _ = print ("received " ^ (Int.toString (!(!count))) ^ "\n")
                 val _ = (#pollFd ss) := makeFD (#socket ss) (true, true, false)
             in
-                true
+                not error
             end
         fun whandle (Session ss) =
             let
                 val _ = print ("write handler\n")
                 val sock = #socket ss
-                val _ = write (sock, "Hello World\n")
+                val ret = write (sock, "Hello World\n")
                 val _ = (#pollFd ss) := makeFD (#socket ss) (true, false, false)
             in
-                true
+                if ret > 0 then true
+                else false
             end
     in
         {
@@ -187,12 +204,12 @@ fun main () : unit =
                                 val e1 = if isIn
                                          then (#readHandler ss) (Session ss)
                                          else true
-                                val e2 = if isOut
+                                val e2 = if isOut andalso e1
                                          then (#writeHandler ss) (Session ss)
-                                         else true
-                                val e3 = if isPri
+                                         else true andalso e1
+                                val e3 = if isPri andalso e2
                                          then (#exceptHandler ss) (Session ss)
-                                         else true
+                                         else true andalso e2
                                 in (SOME (Session ss),
                                     e1 andalso e2 andalso e3)
                             end
