@@ -1,0 +1,19 @@
+
+%%
+
+%eop EOF
+
+%pos int
+
+%left 
+
+%term 
+    CHAR of int
+  | ID of string 
+  | Num of int
+  | ADD | SUB | MUL | DIV | SEMI
+%nonterm 
+   expr
+   
+
+%verbose

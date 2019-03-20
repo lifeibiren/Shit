@@ -35,16 +35,18 @@ fun read socket : string =
 fun readNB socket : string * bool =
     let
         val arraySlice = Word8ArraySlice.full (Word8Array.array (1, Word8.fromInt 0))
-        fun loop socket = case Socket.recvArrNB (socket, arraySlice) of
-                            SOME size => if size > 0 then
-                                            let val str = (Byte.unpackString o
-                                                    Word8ArraySlice.subslice) (arraySlice, 0, SOME size)
-                                                val (left, error) = loop socket
-                                            in
-                                                (str ^ left, error)
-                                            end
-                                        else ("", true) (* EOF *)
-                          | NONE => ("", false)
+        fun loop socket =
+            case Socket.recvArrNB (socket, arraySlice) of
+                SOME size =>
+                    if size > 0 then
+                        let val str = (Byte.unpackString o
+                                Word8ArraySlice.subslice) (arraySlice, 0, SOME size)
+                            val (left, error) = loop socket
+                        in
+                            (str ^ left, error)
+                        end
+                    else ("", true) (* EOF *)
+              | NONE => ("", false)
     in
         loop socket
     end
