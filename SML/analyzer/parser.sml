@@ -9,8 +9,9 @@ let
     fun extract () = let
                          val token = lexer()
                          val _ = case token of
-                                   INTEGER i => print (Int.toString i)
-                                 | ID id => print id
+                                   Token (Symbol sym, text, Position (row, column)) => 
+                                    print ("extract token \"" ^ text ^ "\" at " ^
+                                          "(" ^ (Int.toString row) ^ "," ^ (Int.toString column) ^ ")\n")
                                  | _ => ()
                      in
                          if token <> Dec.EOF
