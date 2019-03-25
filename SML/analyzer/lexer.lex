@@ -249,7 +249,7 @@ WS = [\ \t\v\n\f];
 ">"             => ( makeToken GREATER_OP yytext );	
 "^"             => ( makeToken BXOR_OP yytext );	
 "|"             => ( makeToken BOR_OP yytext );	
-"?"             => ( makeToken QUES_OP yytext );	
+"?"             => ( makeToken QUES_OP yytext );
 
 {WS}+           => ( count yytext; lex()  ); 
 

@@ -1,0 +1,7 @@
+local
+    $(SML_LIB)/basis/basis.mlb    
+in 
+    preprocessor.lex.sml
+    preprocessor.grm.sig
+    preprocessor.grm.sml
+end

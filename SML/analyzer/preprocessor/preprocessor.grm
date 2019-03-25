@@ -1,0 +1,125 @@
+
+%%
+
+%eop EOF
+
+%pos int
+
+%nonterm preprocessing_file
+    | group
+    | group_part
+    | if_section
+    | if_group
+    | elif_groups
+    | elif_group
+    | else_group
+    | endif_line
+    | control_line
+    | text_line
+    | non_directive
+    | replacement_list
+    | pp_tokens
+    | constant_expression
+    | preprocessing_token
+    | identifier_list
+
+%term EOF
+    | IF
+    | IFDEF
+    | IFNDEF
+    | ELIF
+    | ELSE
+    | ENDIF
+    | INCLUDE
+    | DEFINE
+    | UNDEF
+    | LINE
+    | ERROR
+    | PRAGMA
+    | NEWLINE
+    | LPAREN
+    | RPAREN
+    | COMMA
+    | IDENTIFIER
+    | PP_TOKENS
+    | ELLIPSIS
+    | HASH
+    | HEADER_NAME
+    | PP_NUMBER
+    | CHARACTER_CONSTANT
+    | STRING_LITERAL
+    | PUNCTUATOR
+    | REST_NO_WHILE_SPACE
+
+%verbose
+%nodefault
+%keyword IF IFDEF IFNDEF ELIF INCLUDE DEFINE UNDEF LINE ERROR PRAGMA
+%start preprocessing_file
+
+%%
+
+preprocessing_file : group ()
+
+group:
+      group_part ()
+    | group group_part ()
+
+group_part:
+      if_section ()
+    | control_line ()
+    | text_line ()
+    | HASH non_directive ()
+
+if_section: if_group endif_line ()
+    | if_group elif_groups endif_line ()
+    | if_group else_group endif_line ()
+    | if_group elif_groups else_group endif_line ()
+
+if_group:
+      IF constant_expression NEWLINE ()
+    | IF constant_expression NEWLINE group ()
+    | IFDEF IDENTIFIER NEWLINE ()
+    | IFDEF IDENTIFIER NEWLINE group ()
+    | IFNDEF IDENTIFIER NEWLINE ()
+    | IFNDEF IDENTIFIER NEWLINE group ()
+
+elif_groups: elif_group ()
+    | elif_groups elif_group ()
+
+elif_group: ELIF constant_expression NEWLINE ()
+    | ELIF constant_expression NEWLINE group ()
+
+endif_line: ENDIF NEWLINE ()
+
+control_line: INCLUDE pp_tokens NEWLINE ()
+    | DEFINE IDENTIFIER replacement_list NEWLINE ()
+    | DEFINE IDENTIFIER LPAREN replacement_list RPAREN NEWLINE ()
+    | DEFINE IDENTIFIER LPAREN identifier_list replacement_list RPAREN NEWLINE ()
+    | DEFINE IDENTIFIER LPAREN ELLIPSIS RPAREN replacement_list NEWLINE ()
+    | DEFINE IDENTIFIER LPAREN identifier_list COMMA ELLIPSIS RPAREN replacement_list NEWLINE ()
+    | UNDEF IDENTIFIER NEWLINE ()
+    | LINE pp_tokens NEWLINE ()
+    | ERROR NEWLINE ()
+    | ERROR pp_tokens NEWLINE ()
+    | PRAGMA NEWLINE ()
+    | PRAGMA pp_tokens NEWLINE ()
+    | NEWLINE ()
+
+text_line: NEWLINE ()
+    | pp_tokens NEWLINE ()
+
+non_directive: pp_tokens NEWLINE ()
+
+replacement_list: preprocessing_token ()
+    | pp_tokens preprocessing_token ()
+
+preprocessing_token: HEADER_NAME ()
+    | IDENTIFIER ()
+    | PP_NUMBER ()
+    | CHARACTER_CONSTANT ()
+    | STRING_LITERAL ()
+    | PUNCTUATOR ()
+    | REST_NO_WHILE_SPACE ()
+
+identifier_list: IDENTIFIER ()
+    | identifier_list COMMA IDENTIFIER ()
