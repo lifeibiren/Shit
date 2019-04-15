@@ -1,3 +1,78 @@
+structure Queue:
+   sig
+      type 'a t
+
+      val new: unit -> 'a t
+      val enque: 'a t * 'a -> unit
+      val deque: 'a t -> 'a option
+   end =
+   struct
+      datatype 'a t = T of {front: 'a list ref, back: 'a list ref}
+
+      fun new () = T {front = ref [], back = ref []}
+
+      fun enque (T {back, ...}, x) = back := x :: !back
+
+      fun deque (T {front, back}) =
+         case !front of
+            [] => (case !back of
+                      [] => NONE
+                    | l => let val l = rev l
+                           in case l of
+                              [] => raise Fail "deque"
+                            | x :: l => (back := []; front := l; SOME x)
+                           end)
+          | x :: l => (front := l; SOME x)
+   end
+
+structure Thread:>
+   sig
+      type t
+      val exit: unit -> 'a
+      val run: unit -> unit
+      val spawn: (unit -> unit) -> unit
+      val yield: unit -> unit
+      val ready: t -> unit
+      val new: (unit -> unit) -> t
+   end =
+   struct
+      open MLton
+      open Thread
+      type t = MLton.Thread.Runnable.t
+      val topLevel: Thread.Runnable.t option ref = ref NONE
+
+      local
+         val threads: Thread.Runnable.t Queue.t = Queue.new ()
+      in
+         fun ready (t: Thread.Runnable.t) : unit =
+            Queue.enque(threads, t)
+         fun next () : Thread.Runnable.t =
+            case Queue.deque threads of
+               NONE => valOf (!topLevel)
+             | SOME t => t
+      end
+
+      fun 'a exit (): 'a = switch (fn _ => next ())
+
+      fun new (f: unit -> unit): Thread.Runnable.t =
+         Thread.prepare
+         (Thread.new (fn () => ((f () handle _ => exit ())
+                                ; exit ())),
+          ())
+
+      fun schedule t = (ready t; next ())
+
+      fun yield (): unit = switch (fn t => schedule (Thread.prepare (t, ())))
+
+      val spawn = ready o new
+
+      fun run(): unit =
+         (switch (fn t =>
+                  (topLevel := SOME (Thread.prepare (t, ()))
+                   ; next()))
+          ; topLevel := NONE)
+   end
+
 datatype ('af,'sock_type) session = Session of {
     socket: ('af, 'sock_type) Socket.sock,
     addr: string,
@@ -6,7 +81,10 @@ datatype ('af,'sock_type) session = Session of {
     pollFd: OS.IO.poll_desc ref,
     readHandler : ('af, 'sock_type) session -> bool,
     writeHandler : ('af, 'sock_type) session -> bool,
-    exceptHandler : ('af, 'sock_type) session -> bool
+    exceptHandler : ('af, 'sock_type) session -> bool,
+    readCoroutine: ('af, 'sock_type) session -> unit ref option,
+    writeCoroutine: ('af, 'sock_type) session -> unit ref option,
+    exceptCrotouine: ('af, 'sock_type) session -> unit ref option
 }
 
 exception Failure;
@@ -110,6 +188,16 @@ fun handleClient sock addr =
                 if ret > 0 then true
                 else false
             end
+
+        fun routine (Session ss) =
+            let
+                val sock = #socket ss
+                val (str, error) = read sock 10
+                val _ = print str
+                val _ = write (sock, "Hello World\n")
+            in
+                ()
+            end
     in
         {
             socket = sock,
@@ -119,7 +207,10 @@ fun handleClient sock addr =
             pollFd = ref (makeFD sock (true, false, false)),
             readHandler = rhandle,
             writeHandler = whandle,
-            exceptHandler = fn _ => false
+            exceptHandler = fn _ => false,
+            readCoroutine = NONE,
+            writeCoroutine = NONE,
+            exceptCoroutine = NONE
         }
     end
 
@@ -248,4 +339,6 @@ fun main () : unit =
         acceptForever sessionTable
     end
 
-val _ = main ()
+val _ = Thread.spawn (fn () => main ())
+val _ = Thread.run ()
+(* val _ = main () *)
