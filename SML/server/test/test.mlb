@@ -1,0 +1,6 @@
+local
+    $(SML_LIB)/basis/default.mlb
+    ../thread.sml
+in
+    test.sml
+end
