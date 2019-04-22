@@ -1,0 +1,6 @@
+local
+    $(SML_LIB)/basis/default.mlb
+in
+    thread.sml
+    socket.sml
+end
