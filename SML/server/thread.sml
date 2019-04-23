@@ -35,15 +35,13 @@ structure Thread:>
       val suspend: unit -> unit
       val ready: t -> unit
       val new: (unit -> unit) -> t
-      val async_wait: (unit -> 'a option) -> 'a
+      val async_wait: (t -> 'a option) -> 'a
    end =
    struct
-
       type t = {thread: MLton.Thread.Runnable.t ref, inQueue: bool ref, exited: bool ref} ref
       val topLevel: t option ref = ref NONE
       val current: t option ref = ref NONE
 
-      exception Failure;
       local
          val threads: t Queue.t = Queue.new ()
       in
@@ -109,10 +107,12 @@ structure Thread:>
 
       val spawn = ready o new
 
-      fun async_wait (complete: unit -> 'a option) : 'a =
-          case complete () of
-            SOME ret => ret
-          | NONE => (suspend(); async_wait complete)
+      fun async_wait (complete: t -> 'a option) : 'a =
+          case !current of
+            NONE => raise Fail "current is NONE, can't do async_wait"
+          | SOME th => case complete th of
+                         SOME ret => ret
+                       | NONE => (suspend(); async_wait complete)
 
 
       fun run(): unit =

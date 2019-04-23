@@ -9,8 +9,8 @@ sig
     val getReader: t -> (t -> unit) option
     val getWriter: t -> (t -> unit) option
     val getIodesc: t -> iodesc
-    val setReader: t -> (t -> unit) -> unit
-    val setWriter: t -> (t -> unit) -> unit
+    val setReader: t * (t -> unit) option -> unit
+    val setWriter: t * (t -> unit) option -> unit
   end
 
   (* structure Timer:
@@ -34,13 +34,27 @@ sig
 
   structure Socket:
   sig
-    val accept: ('af, Socket.passive Socket.stream) Socket.sock
-                  -> (('af, Socket.active Socket.stream) Socket.sock *
-                      'af Socket.sock_addr) option
-    val recvArr: ('af, Socket.active Socket.stream) Socket.sock *
-                   Word8ArraySlice.slice -> int option
-    val sendArr: ('af, Socket.active Socket.stream) Socket.sock *
-                   Word8ArraySlice.slice -> int option
+    type ('af, 'sock_type) t
+    structure Completion:
+    sig
+      type t
+      val any: t
+      val all: t
+      val atLeast: int -> t
+    end
+    val socket: ('af, 'sock_type) Socket.sock * EventLoop.t -> ('af, 'sock_type) t
+    val accept: ('af, Socket.passive Socket.stream) t ->
+                  (('af, Socket.active Socket.stream) Socket.sock *
+                  'af Socket.sock_addr)
+    val recvArrGen: ('af, Socket.active Socket.stream) t *
+                    Word8ArraySlice.slice *
+                    Completion.t -> int
+    val sendArrGen: ('af, Socket.active Socket.stream) t *
+                    Word8ArraySlice.slice *
+                    Completion.t -> int
+    val recvArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+    val sendArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+    val close: ('af, 'sock_type) t -> unit
   end
 end
 
@@ -59,8 +73,8 @@ struct
     fun getReader (T (ref {reader = reader, ...})): (t -> unit) option = !reader
     fun getWriter (T (ref {writer = writer, ...})): (t -> unit) option = !writer
     fun getIodesc (T (ref {desc = desc, ...})): iodesc = desc
-    fun setReader (T (ref {reader = reader, ...})) r: unit = reader := r
-    fun setWriter (T (ref {writer = writer, ...})) w: unit = writer := w
+    fun setReader (T (ref {reader = reader, ...}), r): unit = reader := r
+    fun setWriter (T (ref {writer = writer, ...}), w): unit = writer := w
   end
 
   (* structure Timer =
@@ -99,6 +113,7 @@ struct
     fun doPoll l time: int =
           let
             open OS.IO
+            val _ = Thread.run ()
             val pollDesc = makePollDesc l
             val pollInfo = poll (pollDesc, time)
             fun callHandler info =
@@ -119,6 +134,7 @@ struct
                 ()
               end
             val _ = map (fn info => callHandler info) pollInfo
+            val _ = Thread.run ()
           in
             length pollInfo
           end
@@ -131,66 +147,116 @@ struct
 
   structure Socket =
   struct
+    datatype ('af, 'sock_type) t = T of
+      {socket: ('af, 'sock_type) Socket.sock,
+       event: Event.t,
+       eventLoop: EventLoop.t}
 
-    fun accept sock = Thread.async_wait (
-        fn () => case Socket.acceptNB sock of
-                   NONE   => NONE
-                 | SOME (newSock, addr) => SOME (SOME (newSock, addr))
+    fun setupReader thread event: unit =
+      Event.setReader (event, SOME (fn _ => (Event.setReader (event, NONE);
+                                             Thread.ready thread)))
+    fun setupWriter thread event: unit =
+      Event.setWriter (event, SOME (fn _ => (Event.setWriter (event, NONE);
+                                            Thread.ready thread)))
+    fun socket (sock, loop): ('af, 'sock_type) t =
+      let val e = Event.event (Socket.ioDesc sock, NONE, NONE)
+          val _ = EventLoop.addEvent (loop, e)
+      in T {socket = sock, event = e, eventLoop = loop} end
+
+    fun accept (s as T {socket = sock, event = e, ...}) =
+       Thread.async_wait (
+        fn th => case Socket.acceptNB sock of
+                   NONE   => (setupReader th e; NONE)
+                 | SOME (newSock, addr) => SOME (newSock, addr)
       )
 
-    fun recvArr (sock, arr) =
+    structure Completion =
+    struct
+      type t = int -> int -> bool
+      fun any maxLen len = if len > 0 then true
+                           else false
+      fun atLeast exp maxLen len = if len >= exp orelse len = maxLen then true
+                                   else false
+      fun all maxLen len = if len = maxLen then true
+                           else false
+    end
+
+    fun recvArrGen ((s as T {socket = sock, event = e, ...}), arr, completion) =
       let val len = ref 0
+          val error = ref false
           val maxLen = Word8ArraySlice.length arr
-          fun loop () =
+          fun loop th =
             let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
-            in  case Socket.recvArrNB (sock, subArr) of
-                  NONE   => NONE
-                | SOME n => (len := !len + n;
-                             if n = 0 orelse !len = maxLen
-                             then SOME (SOME (!len))
-                             else NONE)
+                val _ =  case Socket.recvArrNB (sock, subArr) of
+                           NONE => ()
+                         | SOME n => case n of
+                                       0 => error := true
+                                     | _ => len := !len + n
+            in if !error orelse completion maxLen (!len)
+               then SOME (!len)
+               else (setupReader th e; NONE)
             end
       in  Thread.async_wait loop
       end
 
-    fun sendArr (sock, arr) =
+    fun sendArrGen ((s as T {socket = sock, event = e, ...}), arr, completion) =
       let val len = ref 0
+          val error = ref false
           val maxLen = Word8ArraySlice.length arr
-          fun loop () =
+          fun loop th =
             let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
-            in  case Socket.sendArrNB (sock, subArr) of
-                  NONE   => NONE
-                | SOME n => (len := !len + n;
-                             if n = 0 orelse !len = maxLen
-                             then SOME (SOME (!len))
-                             else NONE)
+                val _ =  case Socket.sendArrNB (sock, subArr) of
+                           NONE => ()
+                         | SOME n => case n of
+                                       0 => error := true
+                                     | _ => len := !len + n
+            in if !error orelse completion maxLen (!len)
+               then SOME (!len)
+               else (setupWriter th e; NONE)
             end
       in  Thread.async_wait loop
       end
+
+      fun recvArr (sock, arr) = recvArrGen (sock, arr, Completion.any)
+      fun sendArr (sock, arr) = sendArrGen (sock, arr, Completion.all)
+
+      fun close (s as T {socket = sock, event = e, eventLoop = lp, ...}): unit =
+        let val _ = EventLoop.delEvent (lp, e)
+            val _ = Socket.close sock
+        in () end
   end
 end
-
-(* fun main () = *)
-(* let *)
-
 
 val sockfd = INetSock.TCP.socket ()
 val _ = Socket.bind (sockfd, INetSock.any 1400)
 val _ = Socket.listen (sockfd, 5)
 val desc = Socket.ioDesc sockfd
 val lp = Asio.EventLoop.eventLoop()
+val aSock = Asio.Socket.socket (sockfd, lp)
 
-fun handler e = case Asio.Socket.accept sockfd of
-            NONE => ()
-          | SOME (newSock, addr) =>
-              let val (inAddr, port) = INetSock.fromAddr addr
-                  val _ = print ("New Connection " ^ (NetHostDB.toString inAddr) ^
-                                 " : " ^ (Int.toString port) ^ " " ^ "\n")
-              in () end
+fun connectionThread sock =
+  let val arr = Word8Array.array (10, Word8.fromInt 0)
+      val slice = Word8ArraySlice.full arr
+      fun work () =
+        let val len = Asio.Socket.recvArr (sock, slice)
+            val _ = print ("Received " ^ (Int.toString len) ^ " bytes from client\n")
+            val toSend = Word8ArraySlice.slice (arr, 0, SOME len)
+            val _ = Asio.Socket.sendArr (sock, toSend)
+            val _ = print ("Sent " ^ (Int.toString len) ^ " bytes to cleint\n")
+        in if len <> 0 then work ()
+           else ()
+        end
+  in (work (); Asio.Socket.close sock)
+  end
+  handle _ => Asio.Socket.close sock
 
+fun acceptThread () =
+  let val (newSock, addr) = Asio.Socket.accept aSock
+      val (inAddr, port) = INetSock.fromAddr addr
+      val _ = print ("New Connection " ^ (NetHostDB.toString inAddr) ^
+                     " : " ^ (Int.toString port) ^ " " ^ "\n")
+      val _ = Thread.spawn (fn () => (connectionThread o Asio.Socket.socket) (newSock, lp))
+  in acceptThread () end
+val _ = Thread.spawn acceptThread
 
-val _ = Asio.EventLoop.addEvent (lp, Asio.Event.event (desc, SOME handler, NONE))
 val _ = Asio.EventLoop.run lp
-(* in () end *)
-(* val _ = Thread.spawn (fn () => main()) *)
-(* val _ = Thread.run() *)
