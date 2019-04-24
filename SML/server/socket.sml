@@ -42,16 +42,17 @@ sig
       val all: t
       val atLeast: int -> t
     end
-    val socket: ('af, 'sock_type) Socket.sock * EventLoop.t -> ('af, 'sock_type) t
+    val socket: ('af, 'sock_type) Socket.sock * EventLoop.t ->
+                  ('af, 'sock_type) t
     val accept: ('af, Socket.passive Socket.stream) t ->
                   (('af, Socket.active Socket.stream) Socket.sock *
                   'af Socket.sock_addr)
     val recvArrGen: ('af, Socket.active Socket.stream) t *
-                    Word8ArraySlice.slice *
-                    Completion.t -> int
+                      Word8ArraySlice.slice *
+                      Completion.t -> int
     val sendArrGen: ('af, Socket.active Socket.stream) t *
-                    Word8ArraySlice.slice *
-                    Completion.t -> int
+                      Word8ArraySlice.slice *
+                      Completion.t -> int
     val recvArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
     val sendArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
     val close: ('af, 'sock_type) t -> unit
@@ -118,18 +119,20 @@ struct
             val pollInfo = poll (pollDesc, time)
             fun callHandler info =
               let
+                fun callHandler get e: unit =
+                  case get e of
+                    SOME f => f e
+                  | NONE   => ()
                 val desc = (pollToIODesc o infoToPollDesc) info
-                val event = case getEvent l desc of
-                              SOME e => e
-                            | NONE => raise Bug "Event not found"
-                val _ = if isIn info then case Event.getReader event of
-                                            SOME f => f event
-                                          | NONE => ()
-                        else ()
-                val _ = if isOut info then case Event.getWriter event of
-                                             SOME f => f event
-                                           | NONE => ()
-                        else ()
+                val _ = case getEvent l desc of
+                              (* NONE => raise Bug "Event not found" *)
+                          NONE => ()
+                        | SOME e => (if isIn info
+                                     then callHandler Event.getReader e
+                                     else ();
+                                     if isOut info
+                                     then callHandler Event.getWriter e
+                                     else ())
               in
                 ()
               end
@@ -147,10 +150,16 @@ struct
 
   structure Socket =
   struct
-    datatype ('af, 'sock_type) t = T of
+
+    type 'a final = 'a MLton.Finalizable.t
+
+    datatype ('af, 'sock_type) st = T of
       {socket: ('af, 'sock_type) Socket.sock,
        event: Event.t,
-       eventLoop: EventLoop.t}
+       eventLoop: EventLoop.t,
+       closed: bool ref}
+
+    type ('af, 'sock_type) t = ('af, 'sock_type) st final
 
     fun setupReader thread event: unit =
       Event.setReader (event, SOME (fn _ => (Event.setReader (event, NONE);
@@ -158,17 +167,35 @@ struct
     fun setupWriter thread event: unit =
       Event.setWriter (event, SOME (fn _ => (Event.setWriter (event, NONE);
                                             Thread.ready thread)))
+
+    fun doClose (T {socket = sock, event = e, eventLoop = lp, closed = c, ...}) =
+      if !c then ()
+      else (c := true; EventLoop.delEvent (lp, e);
+            Socket.close sock)
+
+    fun close s: unit =
+        MLton.Finalizable.withValue (s, fn s => doClose s)
+
     fun socket (sock, loop): ('af, 'sock_type) t =
       let val e = Event.event (Socket.ioDesc sock, NONE, NONE)
           val _ = EventLoop.addEvent (loop, e)
-      in T {socket = sock, event = e, eventLoop = loop} end
+          (* Setup finalizer to close socket when it's no longer available *)
+          val s = T {socket = sock, event = e, eventLoop = loop, closed = ref false}
+          val ret =  MLton.Finalizable.new s
+          val _ = MLton.Finalizable.addFinalizer (ret, fn s => doClose s)
+      in ret
+      end
 
-    fun accept (s as T {socket = sock, event = e, ...}) =
-       Thread.async_wait (
-        fn th => case Socket.acceptNB sock of
-                   NONE   => (setupReader th e; NONE)
-                 | SOME (newSock, addr) => SOME (newSock, addr)
-      )
+    fun accept s =
+        MLton.Finalizable.withValue (s,
+          fn T {socket = sock, event = e, ...} =>
+             Thread.async_wait (
+              fn th => case Socket.acceptNB sock of
+                         NONE   => (setupReader th e; NONE)
+                       | SOME (newSock, addr) => SOME (newSock, addr)
+            )
+          )
+
 
     structure Completion =
     struct
@@ -181,58 +208,60 @@ struct
                            else false
     end
 
-    fun recvArrGen ((s as T {socket = sock, event = e, ...}), arr, completion) =
-      let val len = ref 0
-          val error = ref false
-          val maxLen = Word8ArraySlice.length arr
-          fun loop th =
-            let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
-                val _ =  case Socket.recvArrNB (sock, subArr) of
-                           NONE => ()
-                         | SOME n => case n of
-                                       0 => error := true
-                                     | _ => len := !len + n
-            in if !error orelse completion maxLen (!len)
-               then SOME (!len)
-               else (setupReader th e; NONE)
-            end
-      in  Thread.async_wait loop
-      end
+    fun recvArrGen (s, arr, completion) =
+      MLton.Finalizable.withValue (s,
+        fn T {socket = sock, event = e, ...} =>
+          let val len = ref 0
+              val error = ref false
+              val maxLen = Word8ArraySlice.length arr
+              fun loop th =
+                let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
+                    val _ =  case Socket.recvArrNB (sock, subArr) of
+                               NONE => ()
+                             | SOME n => case n of
+                                           0 => error := true
+                                         | _ => len := !len + n
+                in if !error orelse completion maxLen (!len)
+                   then SOME (!len)
+                   else (setupReader th e; NONE)
+                end
+          in  Thread.async_wait loop
+          end
+      )
 
-    fun sendArrGen ((s as T {socket = sock, event = e, ...}), arr, completion) =
-      let val len = ref 0
-          val error = ref false
-          val maxLen = Word8ArraySlice.length arr
-          fun loop th =
-            let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
-                val _ =  case Socket.sendArrNB (sock, subArr) of
-                           NONE => ()
-                         | SOME n => case n of
-                                       0 => error := true
-                                     | _ => len := !len + n
-            in if !error orelse completion maxLen (!len)
-               then SOME (!len)
-               else (setupWriter th e; NONE)
-            end
-      in  Thread.async_wait loop
-      end
+    fun sendArrGen (s, arr, completion) =
+      MLton.Finalizable.withValue (s,
+        fn T {socket = sock, event = e, ...} =>
+          let val len = ref 0
+              val error = ref false
+              val maxLen = Word8ArraySlice.length arr
+              fun loop th =
+                let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
+                    val _ =  case Socket.sendArrNB (sock, subArr) of
+                               NONE => ()
+                             | SOME n => case n of
+                                           0 => error := true
+                                         | _ => len := !len + n
+                in if !error orelse completion maxLen (!len)
+                   then SOME (!len)
+                   else (setupWriter th e; NONE)
+                end
+          in  Thread.async_wait loop
+          end
+      )
 
       fun recvArr (sock, arr) = recvArrGen (sock, arr, Completion.any)
       fun sendArr (sock, arr) = sendArrGen (sock, arr, Completion.all)
-
-      fun close (s as T {socket = sock, event = e, eventLoop = lp, ...}): unit =
-        let val _ = EventLoop.delEvent (lp, e)
-            val _ = Socket.close sock
-        in () end
   end
 end
 
 val sockfd = INetSock.TCP.socket ()
-val _ = Socket.bind (sockfd, INetSock.any 1400)
+val _ = Socket.bind (sockfd, INetSock.any 1200)
 val _ = Socket.listen (sockfd, 5)
 val desc = Socket.ioDesc sockfd
-val lp = Asio.EventLoop.eventLoop()
+val lp = Asio.EventLoop.eventLoop ()
 val aSock = Asio.Socket.socket (sockfd, lp)
+val _ = MLton.Signal.setHandler (Posix.Signal.pipe, MLton.Signal.Handler.ignore)
 
 fun connectionThread sock =
   let val arr = Word8Array.array (10, Word8.fromInt 0)
@@ -246,17 +275,16 @@ fun connectionThread sock =
         in if len <> 0 then work ()
            else ()
         end
-  in (work (); Asio.Socket.close sock)
+  in (work (); MLton.GC.collect ())
   end
-  handle _ => Asio.Socket.close sock
-
 fun acceptThread () =
   let val (newSock, addr) = Asio.Socket.accept aSock
       val (inAddr, port) = INetSock.fromAddr addr
       val _ = print ("New Connection " ^ (NetHostDB.toString inAddr) ^
                      " : " ^ (Int.toString port) ^ " " ^ "\n")
-      val _ = Thread.spawn (fn () => (connectionThread o Asio.Socket.socket) (newSock, lp))
+      val _ = Thread.spawn (fn () => (connectionThread o Asio.Socket.socket)
+                                      (newSock, lp))
   in acceptThread () end
-val _ = Thread.spawn acceptThread
 
+val _ = Thread.spawn acceptThread
 val _ = Asio.EventLoop.run lp
