@@ -1,0 +1,7 @@
+ann
+    "forceUsed"
+in
+    $(SML_LIB)/basis/default.mlb
+    /home/lifei/Git/mlton/lib/mlton/sources.mlb
+    server.sml
+end

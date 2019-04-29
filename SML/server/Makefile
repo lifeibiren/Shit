@@ -9,8 +9,8 @@ LDFLAGS=-lcrypto -lssl
 
 all: server
 
-server: aes.mlb aes.sml
-	$(MLTON_BIN) -output server -link-opt "$(LDFLAGS)" aes.mlb
+server: server.mlb *.sml
+	$(MLTON_BIN) -output server -link-opt "$(LDFLAGS)" server.mlb
 
 clean:
 	rm -f *.o

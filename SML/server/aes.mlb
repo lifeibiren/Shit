@@ -1,7 +1,0 @@
-ann
-    "forceUsed"
-    "allowFFI true"
-in
-    $(SML_LIB)/basis/default.mlb
-    aes.sml
-end
