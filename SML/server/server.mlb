@@ -4,4 +4,6 @@ ann
 in
     $(SML_LIB)/basis/default.mlb
     evp.sml
+    thread.sml
+    socket.sml
 end

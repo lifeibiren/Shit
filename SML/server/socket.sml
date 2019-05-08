@@ -250,8 +250,10 @@ struct
           end
       )
 
-      fun recvArr (sock, arr) = recvArrGen (sock, arr, Completion.any)
+      fun recvArr (sock, arr) = recvArrGen (sock, arr, Completion.all)
+      fun recvSomeArr (sock, arr) = recvArrGen (sock, arr, Completion.any)
       fun sendArr (sock, arr) = sendArrGen (sock, arr, Completion.all)
+      fun sendSomeArr (sock, arr) = sendArrGen (sock, arr, Completion.any)
   end
 end
 
@@ -262,6 +264,67 @@ val desc = Socket.ioDesc sockfd
 val lp = Asio.EventLoop.eventLoop ()
 val aSock = Asio.Socket.socket (sockfd, lp)
 val _ = MLton.Signal.setHandler (Posix.Signal.pipe, MLton.Signal.Handler.ignore)
+
+fun prepareZeroArr len = (Word8ArraySlice.full o Word8Array.array) (len, Word8.fromInt 0)
+fun recvAsArr (sock, len) =
+  let val arr = prepareZeroArr len
+      val _ = Asio.Socket.recvArr (sock, arr)
+  in arr
+  end
+fun arrToIPv4 addr = ""
+
+fun recvClientHello sock: Word8.word * Word8.word * Word8ArraySlice.slice =
+  let val arr = recvAsArr (sock, 2)
+      val ver = Word8ArraySlice.sub (arr, 0)
+      val nmethods = Word8ArraySlice.sub (arr, 1)
+      val methods = recvAsArr (sock, Word8.toInt nmethods)
+  in (ver, nmethods, methods)
+  end
+
+fun sendServerHello sock (ver: Word8.word, method: Word8.word): unit =
+    (Asio.Socket.sendArr (sock, (Word8ArraySlice.full o Word8Array.fromList) [ver, method]); ())
+
+datatype CmdType = CONNECT | BIND | UDP
+fun cmdTypeFromInt 1 = CONNECT
+  | cmdTypeFromInt 2 = BIND
+  | cmdTypeFromInt 3 = UDP
+  | cmdTypeFromInt _ = raise Fail "Invalid cmd type"
+
+fun CmdTypeToString CONNECT = "connect"
+  | CmdTypeToString BIND    = "bind"
+  | CmdTypeToString UDP     = "udp"
+
+fun recvClientReq sock: CmdType * string * int =
+  let val arr = recvAsArr (sock, 4)
+      val ver = Word8ArraySlice.sub (arr, 0)
+      val cmd = (cmdTypeFromInt o Word8.toInt o Word8ArraySlice.sub) (arr, 1)
+      val atype = (Word8.toInt o Word8ArraySlice.sub) (arr, 3)
+      val addr = case atype of
+                1 => (Byte.unpackString o recvAsArr) (sock, 4)
+              | 3 => let val arr = recvAsArr (sock, 1)
+                         val host = recvAsArr (sock, Word8.toInt (Word8ArraySlice.sub (arr, 0)))
+                      in Byte.unpackString host
+                      end
+              | 4 => ""
+              | _ => raise Fail "Invalid address type"
+      val port = let val arr = recvAsArr (sock, 2)
+                     open LargeWord
+                     infix << andb
+                 in toInt ((((Word8.toLarge o Word8ArraySlice.sub) (arr, 0)) << 0w8) andb
+                    ((Word8.toLarge o Word8ArraySlice.sub) (arr, 1)))
+                 end
+  in (cmd, addr, port)
+  end
+
+fun socks5Thread sock =
+  let val (ver, nmethods, methods) = recvClientHello sock
+      val _ = print ("Socks Version " ^ (Word8.toString ver) ^ "\n" )
+      val _ = sendServerHello sock (0w5, 0w0)
+      val (cmd, addr, port) = recvClientReq sock
+      val _ = print ((CmdTypeToString cmd) ^ " " ^ addr ^ " : " ^ (Int.toString port) ^ "\n" )
+  in
+    ()
+  end
 
 fun connectionThread sock =
   let val arr = Word8Array.array (10, Word8.fromInt 0)
@@ -282,7 +345,7 @@ fun acceptThread () =
       val (inAddr, port) = INetSock.fromAddr addr
       val _ = print ("New Connection " ^ (NetHostDB.toString inAddr) ^
                      " : " ^ (Int.toString port) ^ " " ^ "\n")
-      val _ = Thread.spawn (fn () => (connectionThread o Asio.Socket.socket)
+      val _ = Thread.spawn (fn () => (socks5Thread o Asio.Socket.socket)
                                       (newSock, lp))
   in acceptThread () end
 

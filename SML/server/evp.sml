@@ -130,20 +130,24 @@ struct
   end
 end
 
-val string = "The quick brown fox jumps over the lazy dog"
-val key = "01234567890123456789012345678901"
-val iv = "0123456789012345"
-val ectx = Evp.Aes.new ()
-val _ = Evp.Aes.encryptInit (ectx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
-          Byte.stringToBytes key, Byte.stringToBytes iv)
-val dctx = Evp.Aes.new ()
-val _ = Evp.Aes.decryptInit (dctx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
-          Byte.stringToBytes key, Byte.stringToBytes iv)
-val cipher = Evp.Aes.encryptUpdate (ectx, Byte.stringToBytes string)
-val _ = print ("Cipher : " ^ (String.toCString (Byte.bytesToString cipher)) ^ "\n")
-val plain = Evp.Aes.decryptUpdate (dctx, cipher)
-val _ = print ("Plain : " ^ (String.toCString (Byte.bytesToString plain)) ^ "\n")
-
+fun test () =
+let
+  val string = "The quick brown fox jumps over the lazy dog"
+  val key = "01234567890123456789012345678901"
+  val iv = "0123456789012345"
+  val ectx = Evp.Aes.new ()
+  val _ = Evp.Aes.encryptInit (ectx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
+            Byte.stringToBytes key, Byte.stringToBytes iv)
+  val dctx = Evp.Aes.new ()
+  val _ = Evp.Aes.decryptInit (dctx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
+            Byte.stringToBytes key, Byte.stringToBytes iv)
+  val cipher = Evp.Aes.encryptUpdate (ectx, Byte.stringToBytes string)
+  val _ = print ("Cipher : " ^ (String.toCString (Byte.bytesToString cipher)) ^ "\n")
+  val plain = Evp.Aes.decryptUpdate (dctx, cipher)
+  val _ = print ("Plain : " ^ (String.toCString (Byte.bytesToString plain)) ^ "\n")
+in
+  ()
+end
 (* val _ = print ("Original size " ^ (Int.toString (String.size string)) ^ "\n")
 val _ = print ("Output iv: " ^ ((Byte.unpackString o Word8ArraySlice.full) iv_a) ^ "\n")
 val _ = print ("Cipher size " ^ ((Int.toString o Word8Vector.length) cipher) ^ "\n")
