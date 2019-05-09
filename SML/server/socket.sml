@@ -47,6 +47,7 @@ sig
     val accept: ('af, Socket.passive Socket.stream) t ->
                   (('af, Socket.active Socket.stream) Socket.sock *
                   'af Socket.sock_addr)
+    val connect: ('af, 'sock_type) t * 'af Socket.sock_addr -> unit
     val recvArrGen: ('af, Socket.active Socket.stream) t *
                       Word8ArraySlice.slice *
                       Completion.t -> int
@@ -55,6 +56,8 @@ sig
                       Completion.t -> int
     val recvArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
     val sendArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+    val recvSomeArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+    val sendSomeArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
     val close: ('af, 'sock_type) t -> unit
   end
 end
@@ -119,7 +122,7 @@ struct
             val pollInfo = poll (pollDesc, time)
             fun callHandler info =
               let
-                fun callHandler get e: unit =
+                fun doCallHandler get e: unit =
                   case get e of
                     SOME f => f e
                   | NONE   => ()
@@ -128,10 +131,10 @@ struct
                               (* NONE => raise Bug "Event not found" *)
                           NONE => ()
                         | SOME e => (if isIn info
-                                     then callHandler Event.getReader e
+                                     then doCallHandler Event.getReader e
                                      else ();
                                      if isOut info
-                                     then callHandler Event.getWriter e
+                                     then doCallHandler Event.getWriter e
                                      else ())
               in
                 ()
@@ -187,15 +190,33 @@ struct
       end
 
     fun accept s =
-        MLton.Finalizable.withValue (s,
-          fn T {socket = sock, event = e, ...} =>
-             Thread.async_wait (
-              fn th => case Socket.acceptNB sock of
-                         NONE   => (setupReader th e; NONE)
-                       | SOME (newSock, addr) => SOME (newSock, addr)
-            )
+      MLton.Finalizable.withValue (s,
+        fn T {socket = sock, event = e, ...} =>
+           Thread.async_wait (
+            fn th => case Socket.acceptNB sock of
+                       NONE   => (setupReader th e; NONE)
+                     | SOME (newSock, addr) => SOME (newSock, addr)
           )
+        )
 
+    fun connect (s, addr) =
+      MLton.Finalizable.withValue (s,
+        fn T {socket = sock, event = e, ...} =>
+          case Socket.connectNB (sock, addr) of
+            true => ()
+          | false =>
+              let val setup = ref true
+              in  Thread.async_wait (
+                    fn th =>  case !setup of
+                                true => (
+                                  setup := false;
+                                  setupWriter th e;
+                                  NONE
+                                )
+                              | false => SOME ()
+                  )
+              end
+        )
 
     structure Completion =
     struct
@@ -308,12 +329,34 @@ fun recvClientReq sock: CmdType * string * int =
               | 4 => ""
               | _ => raise Fail "Invalid address type"
       val port = let val arr = recvAsArr (sock, 2)
-                     open LargeWord
-                     infix << andb
-                 in toInt ((((Word8.toLarge o Word8ArraySlice.sub) (arr, 0)) << 0w8) andb
-                    ((Word8.toLarge o Word8ArraySlice.sub) (arr, 1)))
+                 in ((Word8.toInt o Word8ArraySlice.sub) (arr, 0)) * 256 +
+                    ((Word8.toInt o Word8ArraySlice.sub) (arr, 1))
                  end
   in (cmd, addr, port)
+  end
+
+fun sendServerRep sock newSock =
+  let val localAddr = Socket.Ctl.getSockName newSock
+      val (inAddr, port) = INetSock.fromAddr localAddr
+      val inAddrStr = NetHostDB.toString inAddr
+      val _ = print ("Local address " ^ inAddrStr ^
+                     " : " ^ (Int.toString port) ^ " " ^ "\n")
+      val portArr = [Word8.fromInt (port div 256), Word8.fromInt (port mod 256)]
+      val arr1 = [0w5, 0w0, 0w0, 0w3, Word8.fromInt (size inAddrStr)]
+      val arr2 = Word8Vector.foldl (fn (a, b) => b @ [a]) [] (Byte.stringToBytes inAddrStr)
+      val toSend = (Word8ArraySlice.full o Word8Array.fromList) (arr1 @ arr2 @ portArr)
+    in
+      (Asio.Socket.sendArr (sock, toSend); ())
+    end
+
+fun doPiping from to =
+  let val arr = prepareZeroArr 65536
+      val n = Asio.Socket.recvSomeArr (from, arr)
+      val _ = Asio.Socket.sendArr (to, Word8ArraySlice.subslice (arr, 0, SOME n))
+      val _ = print ("Piping data " ^ (Int.toString n) ^ "\n")
+  in
+    if n <> 0 then doPiping from to
+    else (Asio.Socket.close from; Asio.Socket.close to)
   end
 
 fun socks5Thread sock =
@@ -322,8 +365,27 @@ fun socks5Thread sock =
       val _ = sendServerHello sock (0w5, 0w0)
       val (cmd, addr, port) = recvClientReq sock
       val _ = print ((CmdTypeToString cmd) ^ " " ^ addr ^ " : " ^ (Int.toString port) ^ "\n" )
+      fun handleReq cmd addr port =
+        case cmd of
+          CONNECT => let  val sockfd = INetSock.TCP.socket ()
+                          val desc = Socket.ioDesc sockfd
+                          val aSock = Asio.Socket.socket (sockfd, lp)
+                          val _ = case NetHostDB.getByName addr of
+                                    NONE => raise Fail "Unable to resolve"
+                                  | SOME en => (
+                                      print ("Connecting to " ^ ((NetHostDB.toString o NetHostDB.addr) en) ^ "\n");
+                                      Asio.Socket.connect (
+                                      aSock, INetSock.toAddr (
+                                          (NetHostDB.addr en), port
+                                      )
+                                    ))
+                          val _ = sendServerRep sock sockfd
+                          val _ = Thread.spawn (fn () => doPiping aSock sock)
+                      in doPiping sock aSock
+                      end
+        | _       => print "Unsupported command\n"
   in
-    ()
+    (handleReq cmd addr port)
   end
 
 fun connectionThread sock =

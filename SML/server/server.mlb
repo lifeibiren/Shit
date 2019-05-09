@@ -5,5 +5,6 @@ in
     $(SML_LIB)/basis/default.mlb
     evp.sml
     thread.sml
+    channel.sml
     socket.sml
 end
