@@ -153,6 +153,7 @@ struct
 
   structure Socket =
   struct
+    exception SocketClosed;
 
     type 'a final = 'a MLton.Finalizable.t
 
@@ -240,7 +241,7 @@ struct
                     val _ =  case Socket.recvArrNB (sock, subArr) of
                                NONE => ()
                              | SOME n => case n of
-                                           0 => error := true
+                                           0 => (error := true; raise SocketClosed)
                                          | _ => len := !len + n
                 in if !error orelse completion maxLen (!len)
                    then SOME (!len)
@@ -261,7 +262,7 @@ struct
                     val _ =  case Socket.sendArrNB (sock, subArr) of
                                NONE => ()
                              | SOME n => case n of
-                                           0 => error := true
+                                           0 => (error := true; raise SocketClosed)
                                          | _ => len := !len + n
                 in if !error orelse completion maxLen (!len)
                    then SOME (!len)
@@ -309,7 +310,7 @@ datatype CmdType = CONNECT | BIND | UDP
 fun cmdTypeFromInt 1 = CONNECT
   | cmdTypeFromInt 2 = BIND
   | cmdTypeFromInt 3 = UDP
-  | cmdTypeFromInt _ = raise Fail "Invalid cmd type"
+  | cmdTypeFromInt _ = raise Fail "invalid command type received from socksv5 client"
 
 fun CmdTypeToString CONNECT = "connect"
   | CmdTypeToString BIND    = "bind"
@@ -353,11 +354,11 @@ fun doPiping from to =
   let val arr = prepareZeroArr 65536
       val n = Asio.Socket.recvSomeArr (from, arr)
       val _ = Asio.Socket.sendArr (to, Word8ArraySlice.subslice (arr, 0, SOME n))
-      val _ = print ("Piping data " ^ (Int.toString n) ^ "\n")
   in
     if n <> 0 then doPiping from to
     else (Asio.Socket.close from; Asio.Socket.close to)
   end
+  handle SocketClosed => (Asio.Socket.close from; Asio.Socket.close to)
 
 fun socks5Thread sock =
   let val (ver, nmethods, methods) = recvClientHello sock
@@ -387,6 +388,7 @@ fun socks5Thread sock =
   in
     (handleReq cmd addr port)
   end
+  handle _ => Asio.Socket.close sock
 
 fun connectionThread sock =
   let val arr = Word8Array.array (10, Word8.fromInt 0)
@@ -402,6 +404,7 @@ fun connectionThread sock =
         end
   in (work (); MLton.GC.collect ())
   end
+
 fun acceptThread () =
   let val (newSock, addr) = Asio.Socket.accept aSock
       val (inAddr, port) = INetSock.fromAddr addr

@@ -5,6 +5,7 @@ structure Queue:
       val new: unit -> 'a t
       val enque: 'a t * 'a -> unit
       val deque: 'a t -> 'a option
+      val num: 'a t -> int
    end =
    struct
       datatype 'a t = T of {front: 'a list ref, back: 'a list ref}
@@ -23,6 +24,8 @@ structure Queue:
                             | x :: l => (back := []; front := l; SOME x)
                            end)
           | x :: l => (front := l; SOME x)
+
+      fun num (T {front, back}) = (length (!front)) + (length (!back))
    end
 
 structure Thread:>
@@ -38,7 +41,9 @@ structure Thread:>
       val async_wait: (t -> 'a option) -> 'a
    end =
    struct
-      type t = {thread: MLton.Thread.Runnable.t ref, inQueue: bool ref, exited: bool ref} ref
+      type t = {thread: MLton.Thread.Runnable.t ref,
+                inQueue: bool ref,
+                exited: bool ref} ref
       val topLevel: t option ref = ref NONE
       val current: t option ref = ref NONE
 
@@ -46,18 +51,19 @@ structure Thread:>
          val threads: t Queue.t = Queue.new ()
       in
          fun ready (t as ref {inQueue = inQueue, exited = exited, ...}: t) : unit =
-            if (not (!inQueue)) andalso (not (!exited)) then
-                ((#inQueue (!t)) := true; print ("enqueue\n");
+            if (not (!inQueue)) andalso (not (!exited)) then (
+                inQueue := true;
                 Queue.enque(threads, t))
             else ()
-         fun next () : t = (print ("dequeue\n");
+         fun next () : t =
             case Queue.deque threads of
                NONE => valOf (!topLevel)
              | SOME (t as ref {inQueue = inQueue, exited = exited, ...}) =>
-                if !exited then next() else ((#inQueue (!t)) := false; t))
+                if !exited then next()
+                else (inQueue := false; t)
       end
       fun saveContext newContext = case !current of
-                          SOME (t as ref {thread = thread, ...}) => (#thread (!t)) := newContext
+                          SOME (t as ref {thread = thread, ...}) => thread := newContext
                         | NONE => ()
 
       fun switch f =
@@ -87,7 +93,7 @@ structure Thread:>
 
       fun new (f: unit -> unit): t =
          ref {thread = ref (MLton.Thread.prepare (
-                    MLton.Thread.new (fn () => ((f () handle _ => exit ()); exit ())),
+                    MLton.Thread.new (fn () => (f (); exit ())),
                     ())),
               inQueue = ref false,
               exited = ref false}
