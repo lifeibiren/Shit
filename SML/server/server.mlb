@@ -6,5 +6,6 @@ in
     evp.sml
     thread.sml
     channel.sml
+    config.sml
     socket.sml
 end

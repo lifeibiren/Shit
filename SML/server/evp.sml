@@ -6,6 +6,7 @@ sig
     sig
       type t
       val cfb: t
+      val ecb: t
     end
     structure Engine:
     sig
@@ -36,7 +37,10 @@ struct
     structure Mode =
     struct
       type t = EVP_CIPHER_t
-      val cfb = let val f = _import  "EVP_aes_256_cfb1" public: unit -> EVP_CIPHER_t;
+      val cfb = let val f = _import "EVP_aes_256_cfb1" public: unit -> EVP_CIPHER_t;
+                in f ()
+                end
+      val ecb = let val f = _import "EVP_aes_256_ecb" public: unit -> EVP_CIPHER_t;
                 in f ()
                 end
     end

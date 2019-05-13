@@ -5,7 +5,7 @@ MLTON_BIN=/usr/bin/mlton
 #MLTON_FLAGS=-profile time -profile-branch true -profile-stack true -profile-val true
 CC=gcc
 CFLAGS=-I$(MLTON_INCLUDE)
-LDFLAGS=-lcrypto -lssl
+LDFLAGS=-L/usr/lib/openssl-1.0/ -lcrypto -lssl
 .PHONY: all clean
 
 all: server

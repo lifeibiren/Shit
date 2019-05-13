@@ -287,6 +287,25 @@ val lp = Asio.EventLoop.eventLoop ()
 val aSock = Asio.Socket.socket (sockfd, lp)
 val _ = MLton.Signal.setHandler (Posix.Signal.pipe, MLton.Signal.Handler.ignore)
 
+local
+  val key = "01234567890123456789012345678901"
+  val iv = "0123456789012345"
+in
+  val ectx = Evp.Aes.new ()
+  val _ = Evp.Aes.encryptInit (ectx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
+            Byte.stringToBytes key, Byte.stringToBytes iv)
+  val dctx = Evp.Aes.new ()
+  val _ = Evp.Aes.decryptInit (dctx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
+            Byte.stringToBytes key, Byte.stringToBytes iv)
+end
+
+(* val encryptArr =
+val cipher = Evp.Aes.encryptUpdate (ectx, Byte.stringToBytes string)
+val _ = print ("Cipher : " ^ (String.toCString (Byte.bytesToString cipher)) ^ "\n")
+val plain = Evp.Aes.decryptUpdate (dctx, cipher) *)
+
+
+
 fun prepareZeroArr len = (Word8ArraySlice.full o Word8Array.array) (len, Word8.fromInt 0)
 fun recvAsArr (sock, len) =
   let val arr = prepareZeroArr len
@@ -294,6 +313,9 @@ fun recvAsArr (sock, len) =
   in arr
   end
 fun arrToIPv4 addr = ""
+
+fun recvDecrypt sock len = ()
+fun sendEncrypt sock arr = ()
 
 fun recvClientHello sock: Word8.word * Word8.word * Word8ArraySlice.slice =
   let val arr = recvAsArr (sock, 2)
@@ -360,6 +382,25 @@ fun doPiping from to =
   end
   handle SocketClosed => (Asio.Socket.close from; Asio.Socket.close to)
 
+(* connect to remote peer and pipe data in both directions *)
+fun connectAndPiping sock addr port =
+  let val sockfd = INetSock.TCP.socket ()
+      val desc = Socket.ioDesc sockfd
+      val aSock = Asio.Socket.socket (sockfd, lp)
+      val _ = case NetHostDB.getByName addr of
+                NONE => raise Fail "Unable to resolve"
+              | SOME en => (
+                  print ("Connecting to " ^ ((NetHostDB.toString o NetHostDB.addr) en) ^ "\n");
+                  Asio.Socket.connect (
+                  aSock, INetSock.toAddr (
+                      (NetHostDB.addr en), port
+                  )
+                ))
+      val _ = sendServerRep sock sockfd
+      val _ = Thread.spawn (fn () => doPiping aSock sock)
+  in doPiping sock aSock
+  end
+
 fun socks5Thread sock =
   let val (ver, nmethods, methods) = recvClientHello sock
       val _ = print ("Socks Version " ^ (Word8.toString ver) ^ "\n" )
@@ -368,22 +409,7 @@ fun socks5Thread sock =
       val _ = print ((CmdTypeToString cmd) ^ " " ^ addr ^ " : " ^ (Int.toString port) ^ "\n" )
       fun handleReq cmd addr port =
         case cmd of
-          CONNECT => let  val sockfd = INetSock.TCP.socket ()
-                          val desc = Socket.ioDesc sockfd
-                          val aSock = Asio.Socket.socket (sockfd, lp)
-                          val _ = case NetHostDB.getByName addr of
-                                    NONE => raise Fail "Unable to resolve"
-                                  | SOME en => (
-                                      print ("Connecting to " ^ ((NetHostDB.toString o NetHostDB.addr) en) ^ "\n");
-                                      Asio.Socket.connect (
-                                      aSock, INetSock.toAddr (
-                                          (NetHostDB.addr en), port
-                                      )
-                                    ))
-                          val _ = sendServerRep sock sockfd
-                          val _ = Thread.spawn (fn () => doPiping aSock sock)
-                      in doPiping sock aSock
-                      end
+          CONNECT => connectAndPiping sock addr port
         | _       => print "Unsupported command\n"
   in
     (handleReq cmd addr port)
@@ -405,14 +431,25 @@ fun connectionThread sock =
   in (work (); MLton.GC.collect ())
   end
 
+
+fun tunnelThread sock =
+  connectAndPiping sock "45.63.7.148" 1200
+
 fun acceptThread () =
   let val (newSock, addr) = Asio.Socket.accept aSock
       val (inAddr, port) = INetSock.fromAddr addr
       val _ = print ("New Connection " ^ (NetHostDB.toString inAddr) ^
                      " : " ^ (Int.toString port) ^ " " ^ "\n")
-      val _ = Thread.spawn (fn () => (socks5Thread o Asio.Socket.socket)
+      fun spawnHandler false = Thread.spawn (fn () => (socks5Thread o Asio.Socket.socket)
                                       (newSock, lp))
+        | spawnHandler true  = Thread.spawn (fn () => (tunnelThread o Asio.Socket.socket)
+                                        (newSock, lp))
+      val _ = spawnHandler tunnelMode
   in acceptThread () end
+
+val _ = case tunnelMode of
+          false => ()
+        | _ => print ("Enter tunnel mode\n")
 
 val _ = Thread.spawn acceptThread
 val _ = Asio.EventLoop.run lp
