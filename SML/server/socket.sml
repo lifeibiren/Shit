@@ -48,16 +48,25 @@ sig
                   (('af, Socket.active Socket.stream) Socket.sock *
                   'af Socket.sock_addr)
     val connect: ('af, 'sock_type) t * 'af Socket.sock_addr -> unit
+
+    val sendVecGen: ('af, Socket.active Socket.stream) t *
+                      Word8VectorSlice.slice *
+                      Completion.t -> int
+
     val recvArrGen: ('af, Socket.active Socket.stream) t *
                       Word8ArraySlice.slice *
                       Completion.t -> int
-    val sendArrGen: ('af, Socket.active Socket.stream) t *
-                      Word8ArraySlice.slice *
-                      Completion.t -> int
-    val recvArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+
     val sendArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
-    val recvSomeArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+    val sendVec: ('af, Socket.active Socket.stream) t * Word8VectorSlice.slice -> int
     val sendSomeArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+    val sendSomeVec: ('af, Socket.active Socket.stream) t * Word8VectorSlice.slice -> int
+
+    val recvArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+    val recvVec: ('af, Socket.active Socket.stream) t * int -> Word8VectorSlice.slice
+    val recvSomeArr: ('af, Socket.active Socket.stream) t * Word8ArraySlice.slice -> int
+    val recvSomeVec: ('af, Socket.active Socket.stream) t * int -> Word8VectorSlice.slice
+
     val close: ('af, 'sock_type) t -> unit
   end
 end
@@ -230,36 +239,15 @@ struct
                            else false
     end
 
-    fun recvArrGen (s, arr, completion) =
+    fun sendVecGen (s, arr, completion) =
       MLton.Finalizable.withValue (s,
         fn T {socket = sock, event = e, ...} =>
           let val len = ref 0
               val error = ref false
-              val maxLen = Word8ArraySlice.length arr
+              val maxLen = Word8VectorSlice.length arr
               fun loop th =
-                let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
-                    val _ =  case Socket.recvArrNB (sock, subArr) of
-                               NONE => ()
-                             | SOME n => case n of
-                                           0 => (error := true; raise SocketClosed)
-                                         | _ => len := !len + n
-                in if !error orelse completion maxLen (!len)
-                   then SOME (!len)
-                   else (setupReader th e; NONE)
-                end
-          in  Thread.async_wait loop
-          end
-      )
-
-    fun sendArrGen (s, arr, completion) =
-      MLton.Finalizable.withValue (s,
-        fn T {socket = sock, event = e, ...} =>
-          let val len = ref 0
-              val error = ref false
-              val maxLen = Word8ArraySlice.length arr
-              fun loop th =
-                let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
-                    val _ =  case Socket.sendArrNB (sock, subArr) of
+                let val subArr = Word8VectorSlice.subslice (arr, !len, NONE)
+                    val _ =  case Socket.sendVecNB (sock, subArr) of
                                NONE => ()
                              | SOME n => case n of
                                            0 => (error := true; raise SocketClosed)
@@ -272,10 +260,49 @@ struct
           end
       )
 
+      fun recvArrGen (s, arr, completion) =
+        MLton.Finalizable.withValue (s,
+          fn T {socket = sock, event = e, ...} =>
+            let val len = ref 0
+                val error = ref false
+                val maxLen = Word8ArraySlice.length arr
+                fun loop th =
+                  let val subArr = Word8ArraySlice.subslice (arr, !len, NONE)
+                      val _ =  case Socket.recvArrNB (sock, subArr) of
+                                 NONE => ()
+                               | SOME n => case n of
+                                             0 => (error := true; raise SocketClosed)
+                                           | _ => len := !len + n
+                  in if !error orelse completion maxLen (!len)
+                     then SOME (!len)
+                     else (setupReader th e; NONE)
+                  end
+            in  Thread.async_wait loop
+            end
+        )
       fun recvArr (sock, arr) = recvArrGen (sock, arr, Completion.all)
       fun recvSomeArr (sock, arr) = recvArrGen (sock, arr, Completion.any)
-      fun sendArr (sock, arr) = sendArrGen (sock, arr, Completion.all)
-      fun sendSomeArr (sock, arr) = sendArrGen (sock, arr, Completion.any)
+      fun recvVec (sock, len) =
+        let val arr = Word8Array.array (len, Word8.fromInt 0)
+            val len = recvArr (sock, Word8ArraySlice.full arr)
+            val vec = Word8Array.vector arr
+        in
+          Word8VectorSlice.slice (vec, 0, SOME(len))
+        end
+      fun recvSomeVec (sock, len) =
+        let val arr = Word8Array.array (len, Word8.fromInt 0)
+            val len = recvSomeArr (sock, Word8ArraySlice.full arr)
+            val vec = Word8Array.vector arr
+        in
+          Word8VectorSlice.slice (vec, 0, SOME(len))
+        end
+
+      fun sendVec (sock, vec) = sendVecGen (sock, vec, Completion.all)
+      fun sendSomeVec (sock, vec) = sendVecGen (sock, vec, Completion.any)
+      fun sendArr (sock, arr) =
+        sendVec (sock, (Word8VectorSlice.full o Word8ArraySlice.vector) arr)
+      fun sendSomeArr (sock, arr) =
+        sendSomeVec (sock, (Word8VectorSlice.full o Word8ArraySlice.vector) arr)
   end
 end
 
@@ -304,24 +331,28 @@ val cipher = Evp.Aes.encryptUpdate (ectx, Byte.stringToBytes string)
 val _ = print ("Cipher : " ^ (String.toCString (Byte.bytesToString cipher)) ^ "\n")
 val plain = Evp.Aes.decryptUpdate (dctx, cipher) *)
 
-
-
-fun prepareZeroArr len = (Word8ArraySlice.full o Word8Array.array) (len, Word8.fromInt 0)
-fun recvAsArr (sock, len) =
-  let val arr = prepareZeroArr len
-      val _ = Asio.Socket.recvArr (sock, arr)
-  in arr
+fun vecToIPv4String vec =
+  let val sub = Word8VectorSlice.sub
+      val str = Int.toString o Word8.toInt
+      fun conv i = (str o sub) (vec, i)
+      infix sub
+  in (conv 0) ^ "." ^ (conv 1) ^ "." ^ (conv 2) ^ "." ^ (conv 3)
   end
-fun arrToIPv4 addr = ""
+fun recvDecryptVec ctx sock len =
+  let val cipher = Asio.Socket.recvVec (sock, len)
+  in Word8VectorSlice.full (Evp.Aes.decryptUpdate (ctx, Word8VectorSlice.vector cipher))
+  end
 
-fun recvDecrypt sock len = ()
-fun sendEncrypt sock arr = ()
+fun sendEncryptVec ctx sock vec =
+  let val cipher = Evp.Aes.encryptUpdate (ctx, vec)
+  in Asio.Socket.sendVec (sock, Word8VectorSlice.full cipher)
+  end
 
-fun recvClientHello sock: Word8.word * Word8.word * Word8ArraySlice.slice =
-  let val arr = recvAsArr (sock, 2)
-      val ver = Word8ArraySlice.sub (arr, 0)
-      val nmethods = Word8ArraySlice.sub (arr, 1)
-      val methods = recvAsArr (sock, Word8.toInt nmethods)
+fun recvClientHello sock: Word8.word * Word8.word * Word8VectorSlice.slice =
+  let val vec = Asio.Socket.recvVec (sock, 2)
+      val ver = Word8VectorSlice.sub (vec, 0)
+      val nmethods = Word8VectorSlice.sub (vec, 1)
+      val methods = Asio.Socket.recvVec (sock, Word8.toInt nmethods)
   in (ver, nmethods, methods)
   end
 
@@ -332,28 +363,35 @@ datatype CmdType = CONNECT | BIND | UDP
 fun cmdTypeFromInt 1 = CONNECT
   | cmdTypeFromInt 2 = BIND
   | cmdTypeFromInt 3 = UDP
-  | cmdTypeFromInt _ = raise Fail "invalid command type received from socksv5 client"
+  | cmdTypeFromInt _ = raise Fail "invalid command type"
 
 fun CmdTypeToString CONNECT = "connect"
   | CmdTypeToString BIND    = "bind"
   | CmdTypeToString UDP     = "udp"
 
+datatype AddrType = IPV4 | DOMAINNAME | IPV6
+fun addrTypeFromInt 1 = IPV4
+  | addrTypeFromInt 3 = DOMAINNAME
+  | addrTypeFromInt 4 = IPV6
+  | addrTypeFromInt _ = raise Fail "invalid address type"
+
 fun recvClientReq sock: CmdType * string * int =
-  let val arr = recvAsArr (sock, 4)
-      val ver = Word8ArraySlice.sub (arr, 0)
-      val cmd = (cmdTypeFromInt o Word8.toInt o Word8ArraySlice.sub) (arr, 1)
-      val atype = (Word8.toInt o Word8ArraySlice.sub) (arr, 3)
-      val addr = case atype of
-                1 => (Byte.unpackString o recvAsArr) (sock, 4)
-              | 3 => let val arr = recvAsArr (sock, 1)
-                         val host = recvAsArr (sock, Word8.toInt (Word8ArraySlice.sub (arr, 0)))
-                      in Byte.unpackString host
-                      end
-              | 4 => ""
+  let val vec = Asio.Socket.recvVec (sock, 4)
+      val ver = Word8VectorSlice.sub (vec, 0)
+      val cmd = (cmdTypeFromInt o Word8.toInt o Word8VectorSlice.sub) (vec, 1)
+      val atype = (Word8.toInt o Word8VectorSlice.sub) (vec, 3)
+      val addr = case addrTypeFromInt atype of
+                IPV4 => (vecToIPv4String o Asio.Socket.recvVec) (sock, 4)
+              | DOMAINNAME =>   let val vec = Asio.Socket.recvVec (sock, 1)
+                                    val hostLen = Word8.toInt (Word8VectorSlice.sub (vec, 0))
+                                    val host = Asio.Socket.recvVec (sock, hostLen)
+                                in Byte.unpackStringVec host
+                                end
+              (* | IPV6 => "" *)
               | _ => raise Fail "Invalid address type"
-      val port = let val arr = recvAsArr (sock, 2)
-                 in ((Word8.toInt o Word8ArraySlice.sub) (arr, 0)) * 256 +
-                    ((Word8.toInt o Word8ArraySlice.sub) (arr, 1))
+      val port = let val vec = Asio.Socket.recvVec (sock, 2)
+                 in ((Word8.toInt o Word8VectorSlice.sub) (vec, 0)) * 256 +
+                    ((Word8.toInt o Word8VectorSlice.sub) (vec, 1))
                  end
   in (cmd, addr, port)
   end
@@ -373,12 +411,11 @@ fun sendServerRep sock newSock =
     end
 
 fun doPiping from to =
-  let val arr = prepareZeroArr 65536
-      val n = Asio.Socket.recvSomeArr (from, arr)
-      val _ = Asio.Socket.sendArr (to, Word8ArraySlice.subslice (arr, 0, SOME n))
+  let val vec = Asio.Socket.recvSomeVec (from, 65536)
+      val _ = Asio.Socket.sendVec (to, vec)
   in
-    if n <> 0 then doPiping from to
-    else (Asio.Socket.close from; Asio.Socket.close to)
+    if Word8VectorSlice.length vec <> 0 then doPiping from to
+    else (Asio.Socket.close from; Asio.Socket.close to; print "normal exit")
   end
   handle SocketClosed => (Asio.Socket.close from; Asio.Socket.close to)
 
