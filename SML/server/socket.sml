@@ -306,30 +306,14 @@ struct
   end
 end
 
-val sockfd = INetSock.TCP.socket ()
-val _ = Socket.bind (sockfd, INetSock.any 1200)
-val _ = Socket.listen (sockfd, 5)
-val desc = Socket.ioDesc sockfd
+val listenSockfd = INetSock.TCP.socket ()
+val _ = Socket.bind (listenSockfd, INetSock.any 1200)
+val _ = Socket.listen (listenSockfd, 5)
+(* val listenDesc = Socket.ioDesc listenSockfd *)
 val lp = Asio.EventLoop.eventLoop ()
-val aSock = Asio.Socket.socket (sockfd, lp)
+val listenSocket = Asio.Socket.socket (listenSockfd, lp)
 val _ = MLton.Signal.setHandler (Posix.Signal.pipe, MLton.Signal.Handler.ignore)
 
-local
-  val key = "01234567890123456789012345678901"
-  val iv = "0123456789012345"
-in
-  val ectx = Evp.Aes.new ()
-  val _ = Evp.Aes.encryptInit (ectx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
-            Byte.stringToBytes key, Byte.stringToBytes iv)
-  val dctx = Evp.Aes.new ()
-  val _ = Evp.Aes.decryptInit (dctx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
-            Byte.stringToBytes key, Byte.stringToBytes iv)
-end
-
-(* val encryptArr =
-val cipher = Evp.Aes.encryptUpdate (ectx, Byte.stringToBytes string)
-val _ = print ("Cipher : " ^ (String.toCString (Byte.bytesToString cipher)) ^ "\n")
-val plain = Evp.Aes.decryptUpdate (dctx, cipher) *)
 
 fun vecToIPv4String vec =
   let val sub = Word8VectorSlice.sub
@@ -338,27 +322,6 @@ fun vecToIPv4String vec =
       infix sub
   in (conv 0) ^ "." ^ (conv 1) ^ "." ^ (conv 2) ^ "." ^ (conv 3)
   end
-fun recvDecryptVec ctx sock len =
-  let val cipher = Asio.Socket.recvVec (sock, len)
-  in Word8VectorSlice.full (Evp.Aes.decryptUpdate (ctx, Word8VectorSlice.vector cipher))
-  end
-
-fun sendEncryptVec ctx sock vec =
-  let val cipher = Evp.Aes.encryptUpdate (ctx, vec)
-  in Asio.Socket.sendVec (sock, Word8VectorSlice.full cipher)
-  end
-
-fun recvClientHello sock: Word8.word * Word8.word * Word8VectorSlice.slice =
-  let val vec = Asio.Socket.recvVec (sock, 2)
-      val ver = Word8VectorSlice.sub (vec, 0)
-      val nmethods = Word8VectorSlice.sub (vec, 1)
-      val methods = Asio.Socket.recvVec (sock, Word8.toInt nmethods)
-  in (ver, nmethods, methods)
-  end
-
-fun sendServerHello sock (ver: Word8.word, method: Word8.word): unit =
-    (Asio.Socket.sendArr (sock, (Word8ArraySlice.full o Word8Array.fromList) [ver, method]); ())
-
 datatype CmdType = CONNECT | BIND | UDP
 fun cmdTypeFromInt 1 = CONNECT
   | cmdTypeFromInt 2 = BIND
@@ -375,53 +338,59 @@ fun addrTypeFromInt 1 = IPV4
   | addrTypeFromInt 4 = IPV6
   | addrTypeFromInt _ = raise Fail "invalid address type"
 
-fun recvClientReq sock: CmdType * string * int =
-  let val vec = Asio.Socket.recvVec (sock, 4)
-      val ver = Word8VectorSlice.sub (vec, 0)
-      val cmd = (cmdTypeFromInt o Word8.toInt o Word8VectorSlice.sub) (vec, 1)
-      val atype = (Word8.toInt o Word8VectorSlice.sub) (vec, 3)
-      val addr = case addrTypeFromInt atype of
-                IPV4 => (vecToIPv4String o Asio.Socket.recvVec) (sock, 4)
-              | DOMAINNAME =>   let val vec = Asio.Socket.recvVec (sock, 1)
-                                    val hostLen = Word8.toInt (Word8VectorSlice.sub (vec, 0))
-                                    val host = Asio.Socket.recvVec (sock, hostLen)
-                                in Byte.unpackStringVec host
-                                end
-              (* | IPV6 => "" *)
-              | _ => raise Fail "Invalid address type"
-      val port = let val vec = Asio.Socket.recvVec (sock, 2)
-                 in ((Word8.toInt o Word8VectorSlice.sub) (vec, 0)) * 256 +
-                    ((Word8.toInt o Word8VectorSlice.sub) (vec, 1))
-                 end
-  in (cmd, addr, port)
-  end
 
-fun sendServerRep sock newSock =
-  let val localAddr = Socket.Ctl.getSockName newSock
-      val (inAddr, port) = INetSock.fromAddr localAddr
-      val inAddrStr = NetHostDB.toString inAddr
-      val _ = print ("Local address " ^ inAddrStr ^
-                     " : " ^ (Int.toString port) ^ " " ^ "\n")
-      val portArr = [Word8.fromInt (port div 256), Word8.fromInt (port mod 256)]
-      val arr1 = [0w5, 0w0, 0w0, 0w3, Word8.fromInt (size inAddrStr)]
-      val arr2 = Word8Vector.foldl (fn (a, b) => b @ [a]) [] (Byte.stringToBytes inAddrStr)
-      val toSend = (Word8ArraySlice.full o Word8Array.fromList) (arr1 @ arr2 @ portArr)
-    in
-      (Asio.Socket.sendArr (sock, toSend); ())
-    end
+(* local *)
+  val key = "01234567890123456789012345678901"
+  val iv = "0123456789012345"
+(* in
+  val ectx = Evp.Aes.new ()
+  val _ = Evp.Aes.encryptInit (ectx, Evp.Aes.Mode.ecb, Evp.Aes.Engine.default,
+            Byte.stringToBytes key, Byte.stringToBytes iv)
+  val dctx = Evp.Aes.new ()
+  val _ = Evp.Aes.decryptInit (dctx, Evp.Aes.Mode.ecb, Evp.Aes.Engine.default,
+            Byte.stringToBytes key, Byte.stringToBytes iv)
+end *)
+
+val _ = case tunnelMode of
+          false => ()
+        | _ => print ("Enter tunnel mode\n")
+
+fun recvSomeDecryptVec ctx (sock, len) =
+  let val cipher = Asio.Socket.recvSomeVec (sock, len)
+  in Word8VectorSlice.full (Evp.Aes.decryptUpdate (ctx, Word8VectorSlice.vector cipher))
+  end
+fun recvDecryptVec ctx (sock, len) =
+  let val cipher = Asio.Socket.recvVec (sock, len)
+  in Word8VectorSlice.full (Evp.Aes.decryptUpdate (ctx, Word8VectorSlice.vector cipher))
+  end
+fun sendEncryptVec ctx (sock, vec) =
+  let val cipher = Evp.Aes.encryptUpdate (ctx, Word8VectorSlice.vector vec)
+  in Asio.Socket.sendVec (sock, Word8VectorSlice.full cipher)
+  end
 
 fun doPiping from to =
-  let val vec = Asio.Socket.recvSomeVec (from, 65536)
-      val _ = Asio.Socket.sendVec (to, vec)
+  let val vec = from ()
+      val _ = to vec
+      val _ = print("Piping once\n")
   in
     if Word8VectorSlice.length vec <> 0 then doPiping from to
-    else (Asio.Socket.close from; Asio.Socket.close to; print "normal exit")
+    else (print "normal exit")
   end
-  handle SocketClosed => (Asio.Socket.close from; Asio.Socket.close to)
 
 (* connect to remote peer and pipe data in both directions *)
-fun connectAndPiping sock addr port =
-  let val sockfd = INetSock.TCP.socket ()
+
+
+fun tunnelThread sock =
+  let val _ = print("tunnel thread\n")
+      val ectx = Evp.Aes.new ()
+      val _ = Evp.Aes.encryptInit (ectx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
+              Byte.stringToBytes key, Byte.stringToBytes iv)
+      val dctx = Evp.Aes.new ()
+      val _ = Evp.Aes.decryptInit (dctx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
+              Byte.stringToBytes key, Byte.stringToBytes iv)
+      val addr = "45.63.7.148"
+      val port = 1200
+      val sockfd = INetSock.TCP.socket ()
       val desc = Socket.ioDesc sockfd
       val aSock = Asio.Socket.socket (sockfd, lp)
       val _ = case NetHostDB.getByName addr of
@@ -433,60 +402,149 @@ fun connectAndPiping sock addr port =
                       (NetHostDB.addr en), port
                   )
                 ))
-      val _ = sendServerRep sock sockfd
-      val _ = Thread.spawn (fn () => doPiping aSock sock)
-  in doPiping sock aSock
+      val _ = print("Connected\n")
+      fun fromServer () = recvSomeDecryptVec dctx (aSock, 4096)
+      fun fromLocal () = Asio.Socket.recvSomeVec (sock, 4096)
+      fun toServer vec = sendEncryptVec ectx (aSock, vec)
+      fun toLocal  vec = Asio.Socket.sendVec (sock, vec)
+      val _ = Thread.spawn (fn () => doPiping fromServer toLocal
+                            handle SocketClosed => Asio.Socket.close aSock)
+  in doPiping fromLocal toServer
   end
+  handle SocketClosed => (Asio.Socket.close sock)
 
-fun socks5Thread sock =
-  let val (ver, nmethods, methods) = recvClientHello sock
-      val _ = print ("Socks Version " ^ (Word8.toString ver) ^ "\n" )
-      val _ = sendServerHello sock (0w5, 0w0)
-      val (cmd, addr, port) = recvClientReq sock
-      val _ = print ((CmdTypeToString cmd) ^ " " ^ addr ^ " : " ^ (Int.toString port) ^ "\n" )
-      fun handleReq cmd addr port =
-        case cmd of
-          CONNECT => connectAndPiping sock addr port
-        | _       => print "Unsupported command\n"
-  in
-    (handleReq cmd addr port)
-  end
-  handle _ => Asio.Socket.close sock
+  (* connectAndPiping sock "45.63.7.148" 1200 *)
 
-fun connectionThread sock =
-  let val arr = Word8Array.array (10, Word8.fromInt 0)
-      val slice = Word8ArraySlice.full arr
-      fun work () =
-        let val len = Asio.Socket.recvArr (sock, slice)
-            val _ = print ("Received " ^ (Int.toString len) ^ " bytes from client\n")
-            val toSend = Word8ArraySlice.slice (arr, 0, SOME len)
-            val _ = Asio.Socket.sendArr (sock, toSend)
-            val _ = print ("Sent " ^ (Int.toString len) ^ " bytes to cleint\n")
-        in if len <> 0 then work ()
-           else ()
+fun ServerThread sock =
+  let val ectx = Evp.Aes.new ()
+      val _ = Evp.Aes.encryptInit (ectx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
+              Byte.stringToBytes key, Byte.stringToBytes iv)
+      val dctx = Evp.Aes.new ()
+      val _ = Evp.Aes.decryptInit (dctx, Evp.Aes.Mode.cfb, Evp.Aes.Engine.default,
+              Byte.stringToBytes key, Byte.stringToBytes iv)
+    local
+      val recvVec = recvDecryptVec dctx
+      val sendVec = sendEncryptVec ectx
+      val recvSomeVec = recvSomeDecryptVec dctx
+    in
+      fun recvClientHello sock: Word8.word * Word8.word * Word8VectorSlice.slice =
+        let val vec = recvVec (sock, 2)
+            val ver = Word8VectorSlice.sub (vec, 0)
+            val nmethods = Word8VectorSlice.sub (vec, 1)
+            val methods = recvVec (sock, Word8.toInt nmethods)
+        in (ver, nmethods, methods)
         end
-  in (work (); MLton.GC.collect ())
+
+      fun sendServerHello sock (ver: Word8.word, method: Word8.word): unit =
+          (sendVec (sock, (Word8VectorSlice.full o Word8Vector.fromList) [ver, method]); ())
+
+      fun recvClientReq sock: CmdType * string * int =
+        let val vec = recvVec (sock, 4)
+            val ver = Word8VectorSlice.sub (vec, 0)
+            val cmd = (cmdTypeFromInt o Word8.toInt o Word8VectorSlice.sub) (vec, 1)
+            val atype = (Word8.toInt o Word8VectorSlice.sub) (vec, 3)
+            val addr = case addrTypeFromInt atype of
+                      IPV4 => (vecToIPv4String o recvVec) (sock, 4)
+                    | DOMAINNAME =>   let val vec = recvVec (sock, 1)
+                                          val hostLen = Word8.toInt (Word8VectorSlice.sub (vec, 0))
+                                          val host = recvVec (sock, hostLen)
+                                      in Byte.unpackStringVec host
+                                      end
+                    (* | IPV6 => "" *)
+                    | _ => raise Fail "Invalid address type"
+            val port = let val vec = recvVec (sock, 2)
+                       in ((Word8.toInt o Word8VectorSlice.sub) (vec, 0)) * 256 +
+                          ((Word8.toInt o Word8VectorSlice.sub) (vec, 1))
+                       end
+        in (cmd, addr, port)
+        end
+
+      fun sendServerRep sock newSock =
+        let val localAddr = Socket.Ctl.getSockName newSock
+            val (inAddr, port) = INetSock.fromAddr localAddr
+            val inAddrStr = NetHostDB.toString inAddr
+            val _ = print ("Local address " ^ inAddrStr ^
+                           " : " ^ (Int.toString port) ^ " " ^ "\n")
+            val portArr = [Word8.fromInt (port div 256), Word8.fromInt (port mod 256)]
+            val arr1 = [0w5, 0w0, 0w0, 0w3, Word8.fromInt (size inAddrStr)]
+            val arr2 = Word8Vector.foldl (fn (a, b) => b @ [a]) [] (Byte.stringToBytes inAddrStr)
+            val toSend = (Word8VectorSlice.full o Word8Vector.fromList) (arr1 @ arr2 @ portArr)
+          in
+            (sendVec (sock, toSend); ())
+          end
+      fun connectAndPiping sock addr port =
+        let val sockfd = INetSock.TCP.socket ()
+            val desc = Socket.ioDesc sockfd
+            val aSock = Asio.Socket.socket (sockfd, lp)
+            val _ = case NetHostDB.getByName addr of
+                      NONE => raise Fail "Unable to resolve"
+                    | SOME en => (
+                        print ("Connecting to " ^ ((NetHostDB.toString o NetHostDB.addr) en) ^ "\n");
+                        Asio.Socket.connect (
+                        aSock, INetSock.toAddr (
+                            (NetHostDB.addr en), port
+                        )
+                      ))
+            val _ = sendServerRep sock sockfd
+            fun fromClient () =
+              let val vec = recvSomeVec (sock, 4096)
+                  val _ = print ("received from clinet " ^ (Int.toString (Word8VectorSlice.length vec)) ^ "\n")
+              in vec end
+
+            fun fromRemote () = Asio.Socket.recvSomeVec (aSock, 4096)
+            fun toClient vec =
+              let val n = sendVec (sock, vec)
+                  val _ = print ("sent to clinet " ^ (Int.toString n) ^ "\n")
+              in n end
+            fun toRemote vec = Asio.Socket.sendVec (aSock, vec)
+            val _ = Thread.spawn (fn () => doPiping fromClient toRemote
+                                  handle SocketClosed => Asio.Socket.close aSock)
+        in doPiping fromRemote toClient
+        end
+        handle SocketClosed => (Asio.Socket.close sock)
+
+      fun socks5Thread sock =
+        let val (ver, nmethods, methods) = recvClientHello sock
+            val _ = print ("Socks Version " ^ (Word8.toString ver) ^ "\n" )
+            val _ = sendServerHello sock (0w5, 0w0)
+            val (cmd, addr, port) = recvClientReq sock
+            val _ = print ((CmdTypeToString cmd) ^ " " ^ addr ^ " : " ^ (Int.toString port) ^ "\n" )
+            fun handleReq cmd addr port =
+              case cmd of
+                CONNECT => connectAndPiping sock addr port
+              | _       => print "Unsupported command\n"
+        in
+          (handleReq cmd addr port)
+        end
+        handle _ => Asio.Socket.close sock
+    end
+  in
+    socks5Thread sock
   end
-
-
-fun tunnelThread sock =
-  connectAndPiping sock "45.63.7.148" 1200
+  (* fun connectionThread sock =
+    let fun work () =
+          let val vec = recvVec (sock, slice)
+              val _ = print ("Received " ^ (Int.toString len) ^ " bytes from client\n")
+              val toSend = Word8VectorSlice.slice (vec, 0, SOME len)
+              val _ = sendVec (sock, toSend)
+              val _ = print ("Sent " ^ (Int.toString len) ^ " bytes to cleint\n")
+          in if len <> 0 then work ()
+             else ()
+          end
+    in (work (); MLton.GC.collect ())
+    end *)
 
 fun acceptThread () =
-  let val (newSock, addr) = Asio.Socket.accept aSock
+  let val (newSock, addr) = Asio.Socket.accept listenSocket
       val (inAddr, port) = INetSock.fromAddr addr
       val _ = print ("New Connection " ^ (NetHostDB.toString inAddr) ^
                      " : " ^ (Int.toString port) ^ " " ^ "\n")
-      fun spawnHandler false = Thread.spawn (fn () => (socks5Thread o Asio.Socket.socket)
+      fun spawnHandler false = Thread.spawn (fn () => (ServerThread o Asio.Socket.socket)
                                       (newSock, lp))
         | spawnHandler true  = Thread.spawn (fn () => (tunnelThread o Asio.Socket.socket)
                                         (newSock, lp))
       val _ = spawnHandler tunnelMode
   in acceptThread () end
-
-val _ = case tunnelMode of
-          false => ()
-        | _ => print ("Enter tunnel mode\n")
 
 val _ = Thread.spawn acceptThread
 val _ = Asio.EventLoop.run lp
