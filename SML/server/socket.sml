@@ -371,10 +371,9 @@ fun sendEncryptVec ctx (sock, vec) =
 fun doPiping from to =
   let val vec = from ()
       val _ = to vec
-      val _ = print("Piping once\n")
   in
     if Word8VectorSlice.length vec <> 0 then doPiping from to
-    else (print "normal exit")
+    else ()
   end
 
 (* connect to remote peer and pipe data in both directions *)
@@ -408,10 +407,16 @@ fun tunnelThread sock =
       fun toServer vec = sendEncryptVec ectx (aSock, vec)
       fun toLocal  vec = Asio.Socket.sendVec (sock, vec)
       val _ = Thread.spawn (fn () => doPiping fromServer toLocal
-                            handle SocketClosed => Asio.Socket.close aSock)
-  in doPiping fromLocal toServer
+                            handle SocketClosed => (Asio.Socket.close sock;
+                                                    Asio.Socket.close aSock))
+      val _ = doPiping fromLocal toServer
+              handle SocketClosed => (Asio.Socket.close sock; Asio.Socket.close aSock)
+      val _ = Evp.Aes.free ectx
+      val _ = Evp.Aes.free dctx
+  in
+    ()
   end
-  handle SocketClosed => (Asio.Socket.close sock)
+
 
   (* connectAndPiping sock "45.63.7.148" 1200 *)
 
@@ -474,7 +479,6 @@ fun ServerThread sock =
           end
       fun connectAndPiping sock addr port =
         let val sockfd = INetSock.TCP.socket ()
-            val desc = Socket.ioDesc sockfd
             val aSock = Asio.Socket.socket (sockfd, lp)
             val _ = case NetHostDB.getByName addr of
                       NONE => raise Fail "Unable to resolve"
@@ -487,21 +491,25 @@ fun ServerThread sock =
                       ))
             val _ = sendServerRep sock sockfd
             fun fromClient () =
-              let val vec = recvSomeVec (sock, 4096)
-                  val _ = print ("received from clinet " ^ (Int.toString (Word8VectorSlice.length vec)) ^ "\n")
-              in vec end
+              let val vec = recvSomeVec (sock, 65536)
+                  (* val _ = print ("received from clinet " ^ (Int.toString (Word8VectorSlice.length vec)) ^ "\n") *)
+              in vec
+              end
 
-            fun fromRemote () = Asio.Socket.recvSomeVec (aSock, 4096)
+            fun fromRemote () = Asio.Socket.recvSomeVec (aSock, 65536)
             fun toClient vec =
               let val n = sendVec (sock, vec)
-                  val _ = print ("sent to clinet " ^ (Int.toString n) ^ "\n")
-              in n end
+                  (* val _ = print ("sent to clinet " ^ (Int.toString n) ^ "\n") *)
+              in n
+              end
+
             fun toRemote vec = Asio.Socket.sendVec (aSock, vec)
-            val _ = Thread.spawn (fn () => doPiping fromClient toRemote
-                                  handle SocketClosed => Asio.Socket.close aSock)
+            val _ = Thread.spawn (fn () =>
+              doPiping fromClient toRemote
+              handle SocketClosed => (Asio.Socket.close sock; Asio.Socket.close aSock))
         in doPiping fromRemote toClient
+            handle SocketClosed => (Asio.Socket.close sock; Asio.Socket.close aSock)
         end
-        handle SocketClosed => (Asio.Socket.close sock)
 
       fun socks5Thread sock =
         let val (ver, nmethods, methods) = recvClientHello sock
@@ -518,8 +526,11 @@ fun ServerThread sock =
         end
         handle _ => Asio.Socket.close sock
     end
+    val _ = socks5Thread sock
+    val _ = Evp.Aes.free dctx
+    val _ = Evp.Aes.free ectx
   in
-    socks5Thread sock
+    ()
   end
   (* fun connectionThread sock =
     let fun work () =

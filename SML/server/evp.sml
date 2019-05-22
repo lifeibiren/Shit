@@ -90,7 +90,7 @@ struct
       fun encryptUpdate (ctx, plain) =
         let
           val cipher = Array.array (Vector.length plain, Word8.fromInt 0)
-          val len = ref 0
+          val len = ref (Array.length cipher)
           val _ = case EVP_EncryptUpdate (ctx, cipher, len, plain, Vector.length plain) of
                     1 => ()
                   | _ => raise Fail "EVP_EncryptUpdate"
@@ -101,7 +101,7 @@ struct
       fun encryptFinal ctx =
         let
           val cipher = Array.array (32, Word8.fromInt 0)
-          val len = ref 0
+          val len = ref (Array.length cipher)
           val _ = case EVP_EncryptFinal_ex (ctx, cipher, len) of
                     1 => ()
                   | _ => raise Fail "EVP_EncryptFinal"
@@ -112,7 +112,7 @@ struct
       fun decryptUpdate (ctx, cipher) =
         let
           val plain = Array.array (Vector.length cipher, Word8.fromInt 0)
-          val len = ref 0
+          val len = ref (Array.length plain)
           val _ = case EVP_DecryptUpdate (ctx, plain, len, cipher, Vector.length cipher) of
                     1 => ()
                   | _ => raise Fail "EVP_EncryptUpdate"
@@ -123,7 +123,7 @@ struct
       fun decryptFinal ctx =
         let
           val plain = Array.array (32, Word8.fromInt 0)
-          val len = ref 0
+          val len = ref (Array.length plain)
           val _ = case EVP_DecryptFinal_ex (ctx, plain, len) of
                     1 => ()
                   | _ => raise Fail "EVP_EncryptFinal"
