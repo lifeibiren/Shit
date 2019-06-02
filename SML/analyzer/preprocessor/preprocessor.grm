@@ -1,6 +1,8 @@
 
 %%
 
+%name PreProParser
+
 %eop EOF
 
 %pos int
@@ -21,7 +23,7 @@
     | pp_tokens
     | constant_expression
     | preprocessing_token
-    | identifier_list
+    | identifier_list of string list
 
 %term EOF
     | IF
@@ -40,16 +42,17 @@
     | LPAREN
     | RPAREN
     | COMMA
-    | IDENTIFIER
-    | PP_TOKENS
+    | IDENTIFIER of string
+    | PP_TOKENS of string
     | ELLIPSIS
     | HASH
-    | HEADER_NAME
-    | PP_NUMBER
-    | CHARACTER_CONSTANT
-    | STRING_LITERAL
-    | PUNCTUATOR
-    | REST_NO_WHILE_SPACE
+    | HEADER_NAME of string
+    | PP_NUMBER of string
+    | CHAR_CONSTANT of char
+    | STRING_LITERAL of string
+    | PUNCTUATOR of string
+    | REST_NO_WHILE_SPACE of string
+
 
 %verbose
 %nodefault
@@ -58,7 +61,8 @@
 
 %%
 
-preprocessing_file : group ()
+preprocessing_file :
+      group ()
 
 group:
       group_part ()
@@ -70,7 +74,8 @@ group_part:
     | text_line ()
     | HASH non_directive ()
 
-if_section: if_group endif_line ()
+if_section:
+      if_group endif_line ()
     | if_group elif_groups endif_line ()
     | if_group else_group endif_line ()
     | if_group elif_groups else_group endif_line ()
@@ -110,16 +115,23 @@ text_line: NEWLINE ()
 
 non_directive: pp_tokens NEWLINE ()
 
-replacement_list: preprocessing_token ()
+replacement_list:
+      ()
+    | pp_tokens ()
+
+pp_tokens:
+      preprocessing_token ()
     | pp_tokens preprocessing_token ()
+  
+preprocessing_token:
+      HEADER_NAME (HEADER_NAME)
+    | IDENTIFIER (IDENTIFIER)
+    | PP_NUMBER (PP_NUMBER)
+    | CHAR_CONSTANT (CHAR_CONSTANT)
+    | STRING_LITERAL (STRING_LITERAL)
+    | PUNCTUATOR (PUNCTUATOR)
+    | REST_NO_WHILE_SPACE (REST_NO_WHILE_SPACE)
 
-preprocessing_token: HEADER_NAME ()
-    | IDENTIFIER ()
-    | PP_NUMBER ()
-    | CHARACTER_CONSTANT ()
-    | STRING_LITERAL ()
-    | PUNCTUATOR ()
-    | REST_NO_WHILE_SPACE ()
-
-identifier_list: IDENTIFIER ()
-    | identifier_list COMMA IDENTIFIER ()
+identifier_list:
+      IDENTIFIER ([IDENTIFIER])
+    | identifier_list COMMA IDENTIFIER (identifier_list @ [IDENTIFIER])

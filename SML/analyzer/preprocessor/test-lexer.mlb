@@ -1,6 +1,8 @@
 local
-    $(SML_LIB)/basis/basis.mlb    
-in 
-    preprocessor.lex.sml
-    test-lexer.sml
+  $(SML_LIB)/basis/basis.mlb
+in
+  ast.sig
+  ast.sml
+  preprocessor.lex.sml
+  test-lexer.sml
 end
