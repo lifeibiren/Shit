@@ -2,8 +2,8 @@ local
   $(SML_LIB)/basis/basis.mlb
 in
   PreProSym.sml
-  ast.sig
-  ast.sml
+  (* ast.sig *)
+  (* ast.sml *)
   preprocessor.lex.sml
   PreProParser.sml
 end

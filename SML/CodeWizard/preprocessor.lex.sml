@@ -1,4 +1,4 @@
-structure Mlex=
+structure CPreProLexer=
    struct
     structure UserDeclarations =
       struct
@@ -12,7 +12,7 @@ val lineStart = ref 1
 val columnStart = ref 1
 val error = fn x => TextIO.output(TextIO.stdOut, x ^ "\n")
 
-val eof = fn () => EOF
+val eof = fn () => CPreProToken EOF
 
 fun printYytext text = print (text ^ "\n")
 
@@ -42,9 +42,9 @@ fun tok sym text =
   let
     val _ = count text
   in
-    sym (text, Position (!lineStart, !columnStart))
+    CPreProToken (sym, text, Position (!lineStart, !columnStart))
   end
-  
+
 (*#line 48.1 "preprocessor.lex.sml"*)
 end (* end of user routines *)
 exception LexError (* raised if illegal leaf action tried *)
@@ -1139,41 +1139,41 @@ let fun continue() = lex() in
 
 			(* Application actions *)
 
-  112 => let val yytext=yymktext() in (*#line 115.23 "preprocessor.lex"*) tok PpNumber yytext (*#line 1142.1 "preprocessor.lex.sml"*)
+  112 => let val yytext=yymktext() in (*#line 116.23 "preprocessor.lex"*) tok PpNumber yytext (*#line 1142.1 "preprocessor.lex.sml"*)
  end
-| 143 => let val yytext=yymktext() in (*#line 116.23 "preprocessor.lex"*) tok (CharConstant (String.sub (yytext, 0))) yytext(*#line 1144.1 "preprocessor.lex.sml"*)
+| 143 => let val yytext=yymktext() in (*#line 117.23 "preprocessor.lex"*) tok (CharConstant (String.sub (yytext, 0))) yytext(*#line 1144.1 "preprocessor.lex.sml"*)
  end
-| 15 => let val yytext=yymktext() in (*#line 103.27 "preprocessor.lex"*) tok Ifdef yytext (*#line 1146.1 "preprocessor.lex.sml"*)
+| 15 => let val yytext=yymktext() in (*#line 104.27 "preprocessor.lex"*) tok Ifdef yytext (*#line 1146.1 "preprocessor.lex.sml"*)
  end
-| 2 => let val yytext=yymktext() in (*#line 100.27 "preprocessor.lex"*) tok WhiteSpace yytext(*#line 1148.1 "preprocessor.lex.sml"*)
+| 2 => let val yytext=yymktext() in (*#line 101.27 "preprocessor.lex"*) tok (WhiteSpace yytext) yytext (*#line 1148.1 "preprocessor.lex.sml"*)
  end
-| 201 => let val yytext=yymktext() in (*#line 117.23 "preprocessor.lex"*) tok (StringLiteral yytext) yytext (*#line 1150.1 "preprocessor.lex.sml"*)
+| 201 => let val yytext=yymktext() in (*#line 118.23 "preprocessor.lex"*) tok (StringLiteral yytext) yytext (*#line 1150.1 "preprocessor.lex.sml"*)
  end
-| 24 => let val yytext=yymktext() in (*#line 104.27 "preprocessor.lex"*) tok Ifndef yytext (*#line 1152.1 "preprocessor.lex.sml"*)
+| 24 => let val yytext=yymktext() in (*#line 105.27 "preprocessor.lex"*) tok Ifndef yytext (*#line 1152.1 "preprocessor.lex.sml"*)
  end
-| 289 => let val yytext=yymktext() in (*#line 118.23 "preprocessor.lex"*) tok (Punctuator yytext) yytext (*#line 1154.1 "preprocessor.lex.sml"*)
+| 289 => let val yytext=yymktext() in (*#line 119.23 "preprocessor.lex"*) tok (Punctuator yytext) yytext (*#line 1154.1 "preprocessor.lex.sml"*)
  end
-| 291 => let val yytext=yymktext() in (*#line 120.23 "preprocessor.lex"*) count yytext; error ("ignoring bad character " ^ yytext); lex()(*#line 1156.1 "preprocessor.lex.sml"*)
+| 291 => let val yytext=yymktext() in (*#line 121.23 "preprocessor.lex"*) count yytext; error ("ignoring bad character " ^ yytext); lex()(*#line 1156.1 "preprocessor.lex.sml"*)
  end
-| 31 => let val yytext=yymktext() in (*#line 105.27 "preprocessor.lex"*) tok Elif yytext (*#line 1158.1 "preprocessor.lex.sml"*)
+| 31 => let val yytext=yymktext() in (*#line 106.27 "preprocessor.lex"*) tok Elif yytext (*#line 1158.1 "preprocessor.lex.sml"*)
  end
-| 39 => let val yytext=yymktext() in (*#line 106.27 "preprocessor.lex"*) tok Endif yytext (*#line 1160.1 "preprocessor.lex.sml"*)
+| 39 => let val yytext=yymktext() in (*#line 107.27 "preprocessor.lex"*) tok Endif yytext (*#line 1160.1 "preprocessor.lex.sml"*)
  end
-| 49 => let val yytext=yymktext() in (*#line 107.27 "preprocessor.lex"*) tok Include yytext (*#line 1162.1 "preprocessor.lex.sml"*)
+| 49 => let val yytext=yymktext() in (*#line 108.27 "preprocessor.lex"*) tok Include yytext (*#line 1162.1 "preprocessor.lex.sml"*)
  end
-| 57 => let val yytext=yymktext() in (*#line 108.27 "preprocessor.lex"*) tok Undef yytext (*#line 1164.1 "preprocessor.lex.sml"*)
+| 57 => let val yytext=yymktext() in (*#line 109.27 "preprocessor.lex"*) tok Undef yytext (*#line 1164.1 "preprocessor.lex.sml"*)
  end
-| 64 => let val yytext=yymktext() in (*#line 109.27 "preprocessor.lex"*) tok Line yytext (*#line 1166.1 "preprocessor.lex.sml"*)
+| 64 => let val yytext=yymktext() in (*#line 110.27 "preprocessor.lex"*) tok Line yytext (*#line 1166.1 "preprocessor.lex.sml"*)
  end
-| 7 => let val yytext=yymktext() in (*#line 102.27 "preprocessor.lex"*) tok If yytext (*#line 1168.1 "preprocessor.lex.sml"*)
+| 7 => let val yytext=yymktext() in (*#line 103.27 "preprocessor.lex"*) tok If yytext (*#line 1168.1 "preprocessor.lex.sml"*)
  end
-| 72 => let val yytext=yymktext() in (*#line 110.27 "preprocessor.lex"*) tok Error yytext (*#line 1170.1 "preprocessor.lex.sml"*)
+| 72 => let val yytext=yymktext() in (*#line 111.27 "preprocessor.lex"*) tok Error yytext (*#line 1170.1 "preprocessor.lex.sml"*)
  end
-| 81 => let val yytext=yymktext() in (*#line 111.27 "preprocessor.lex"*) tok Pragma yytext (*#line 1172.1 "preprocessor.lex.sml"*)
+| 81 => let val yytext=yymktext() in (*#line 112.27 "preprocessor.lex"*) tok Pragma yytext (*#line 1172.1 "preprocessor.lex.sml"*)
  end
-| 90 => let val yytext=yymktext() in (*#line 113.23 "preprocessor.lex"*) tok (HeaderName (String.substring(yytext, 1, String.size (yytext) - 2))) yytext (*#line 1174.1 "preprocessor.lex.sml"*)
+| 90 => let val yytext=yymktext() in (*#line 114.23 "preprocessor.lex"*) tok (HeaderName (String.substring(yytext, 1, String.size (yytext) - 2))) yytext (*#line 1174.1 "preprocessor.lex.sml"*)
  end
-| 94 => let val yytext=yymktext() in (*#line 114.23 "preprocessor.lex"*) tok (Identifier yytext) yytext (*#line 1176.1 "preprocessor.lex.sml"*)
+| 94 => let val yytext=yymktext() in (*#line 115.23 "preprocessor.lex"*) tok (Identifier yytext) yytext (*#line 1176.1 "preprocessor.lex.sml"*)
  end
 | _ => raise Internal.LexerError
 

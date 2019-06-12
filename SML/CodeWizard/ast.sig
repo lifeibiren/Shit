@@ -12,4 +12,3 @@ sig
   val root: 'a t -> 'a Node.t
   (* val tranverse: 'a t -> (a' Node.t -> 'b) -> 'a t *)
 end
-

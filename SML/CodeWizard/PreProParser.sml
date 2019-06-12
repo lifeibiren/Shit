@@ -2,6 +2,11 @@ structure Dec = CPreProLexer.UserDeclarations
 
 open Dec;
 
+fun genTokenList lexer: CPreProToken list =
+  case lexer () of
+    CPreProToken EOF => []
+  | tok => tok :: genTokenList lexer
+
 fun main () =
 let
     val lexer = CPreProLexer.makeLexer(fn n => TextIO.inputN(TextIO.stdIn, n))
@@ -9,9 +14,9 @@ let
     fun extract () = let
                          val token = lexer()
                          val _ = case token of
-                                   Token (WhiteSpace _, _, _) => ()
+                                   CPreProToken (WhiteSpace _, _, _) => ()
 
-                                 | Token (sym, text, Position (row, column)) =>
+                                 | CPreProToken (sym, text, Position (row, column)) =>
                                     print ("extract token \"" ^ text ^ "\" at " ^
                                           "(" ^ (Int.toString row) ^ "," ^ (Int.toString column) ^ ")\n")
                                  | _ => ()

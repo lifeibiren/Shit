@@ -1,4 +1,4 @@
-structure PreProSym = 
+structure PreProSym =
 struct
     datatype CPreProSymbol =
         If                      |
@@ -15,13 +15,14 @@ struct
         HeaderName    of string |
         Identifier    of string |
         PpNumber                |
-        CharConstant            |
+        CharConstant  of char   |
         StringLiteral of string |
         Punctuator    of string |
         WhiteSpace    of string
 
     (* row, column *)
-    datatype Position = Position of int * int 
+    datatype Position = Position of int * int
 
-    datatype CPreProToken = Token of CPreProSymbol * string * Position | EOF
+    datatype CPreProToken = CPreProToken of
+      CPreProSymbol * string * Position | EOF
 end

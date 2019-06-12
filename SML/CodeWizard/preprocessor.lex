@@ -8,7 +8,7 @@ val lineStart = ref 1
 val columnStart = ref 1
 val error = fn x => TextIO.output(TextIO.stdOut, x ^ "\n")
 
-val eof = fn () => EOF
+val eof = fn () => CPreProToken EOF
 
 fun printYytext text = print (text ^ "\n")
 
@@ -38,10 +38,11 @@ fun tok sym text =
   let
     val _ = count text
   in
-    sym (text, Position (!lineStart, !columnStart))
+    CPreProToken (sym, text, Position (!lineStart, !columnStart))
   end
-  
+
 %%
+%structure CPreProLexer
 
 white_space = [\ \t\n\r\t];
 digit = [0-9];
@@ -97,7 +98,7 @@ punctuator =   "["   | "]"  | "("  | ")"   | "{"  | "}"  | "."  | "->" |
 %%
 
 
-{white_space}+        => ( tok WhiteSpace yytext);
+{white_space}+        => ( tok (WhiteSpace yytext) yytext );
 
 "#" [^\n]* "if"       => ( tok If yytext );
 "#" [^\n]* "ifdef"    => ( tok Ifdef yytext );
