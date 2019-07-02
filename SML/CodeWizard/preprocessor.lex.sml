@@ -12,7 +12,7 @@ val lineStart = ref 1
 val columnStart = ref 1
 val error = fn x => TextIO.output(TextIO.stdOut, x ^ "\n")
 
-val eof = fn () => CPreProToken EOF
+val eof = fn () => EOF
 
 fun printYytext text = print (text ^ "\n")
 

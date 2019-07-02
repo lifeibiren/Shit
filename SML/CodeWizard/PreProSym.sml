@@ -26,3 +26,15 @@ struct
     datatype CPreProToken = CPreProToken of
       CPreProSymbol * string * Position | EOF
 end
+
+
+datatype ConstExpr =
+  EqualExpr of string * string
+
+datatype CSource =
+    If of ConstExpr * CSource
+  | Elif of ConstExpr * CSource
+  | Endif
+  | Include of string
+  | Pragma of string
+  | Source of string
